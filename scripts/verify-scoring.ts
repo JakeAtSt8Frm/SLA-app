@@ -54,6 +54,7 @@ async function main() {
   const weekStats = new Map<number, Record<string, StatLine>>();
   const weekProj = new Map<number, Record<string, StatLine>>();
   const weekOpponents = new Map<number, Record<string, string>>();
+  const weekTeams = new Map<number, Record<string, string>>();
 
   // ---- Parity check: our score vs Sleeper's players_points ------------------
   let compared = 0;
@@ -74,6 +75,7 @@ async function main() {
     weekStats.set(week, stats.stats);
     weekProj.set(week, proj.stats);
     weekOpponents.set(week, stats.opponents);
+    weekTeams.set(week, stats.teams);
 
     for (const m of matchups) {
       const pp = m.players_points;
@@ -159,8 +161,17 @@ async function main() {
     playersById,
     weekStats,
     weekProjections: weekProj,
+    weekOpponents,
+    weekTeams,
     throughWeek: WEEKS,
   });
+  const invalidValue = [...valueIndex.byPlayer.values()].find(
+    (value) =>
+      !Number.isFinite(value.score) ||
+      !Number.isFinite(value.breakdown.scheduleAdjustedPpg) ||
+      !Number.isFinite(value.breakdown.ewma),
+  );
+  if (invalidValue) throw new Error(`Invalid Value model output for ${invalidValue.pid}`);
   console.log(`  rated players ${valueIndex.byPlayer.size}`);
 
   const groups = ['QB', 'RB', 'WR', 'TE', 'K', 'DL', 'LB', 'DB'] as const;
@@ -188,8 +199,25 @@ async function main() {
     playersById,
     weekStats,
     weekOpponents,
+    weekTeams,
     throughWeek: WEEKS,
   });
+  const sourceTeams = new Set([...weekTeams.values()].flatMap((teams) => Object.values(teams)));
+  const contextualExample = [...matchupIndex.byGroup.entries()]
+    .flatMap(([group, entries]) =>
+      [...entries.values()].flatMap((entry) =>
+        [...sourceTeams].map((sourceTeam) => matchupIndex.get(group, entry.defense, sourceTeam)),
+      ),
+    )
+    .find((entry) => entry?.unitStrengthScore !== null);
+  if (
+    !contextualExample ||
+    !Number.isFinite(contextualExample.score) ||
+    !Number.isFinite(contextualExample.opponentAdjustedPpg) ||
+    !Number.isFinite(contextualExample.opportunitiesPerGame)
+  ) {
+    throw new Error('Contextual Matchup model did not produce a valid score');
+  }
 
   for (const g of ['QB', 'RB', 'WR', 'TE', 'LB'] as const) {
     const entries = [...(matchupIndex.byGroup.get(g)?.values() ?? [])].sort(

@@ -45,16 +45,24 @@ points.
 
 **Custom score** — `scoring_settings` × raw stat keys. Exact, verified above.
 
-**Value Score (0–1000)** — a season-long valuation blending 18 normalised
-signals, each a percentile *within the player's own position group*. Production
-dominates (PPG rank .18, total rank .14, last-8 .08, availability .08,
-consistency .06); market signal is deliberately tiny (.005) as a tie-breaker.
-Age is excluded — this is an in-season model, not a dynasty ranking. Small
-samples blend toward neutral rather than being crushed to zero.
+**Value Score (0–1000)** — a season-long valuation blending 11 normalised
+signals, each a percentile *within the player's own position group*. The model
+prioritises PPG (.22), exponentially weighted form (.16), the current projection
+(.14), recent team opportunity share (.12), recent snap share (.11), last-four
+production (.08) and schedule-adjusted PPG (.07). Usage, floor, availability and
+efficiency provide the remaining .10. Age and popularity are excluded: this is
+an in-season performance model, not a dynasty or consensus ranking.
 
-**Matchup Score (0–100)** — per-position-group defensive generosity, combining
-rank base, recent trend, ceiling and floor rates, consistency and top-10 rate.
-100 = softest defence in the league to face.
+**Matchup Score (0–100)** — a contextual next-week rating. It combines the
+defence-only generosity model (.35), opponent-adjusted concessions (.15),
+opportunity volume allowed (.10), and the historical strength of the player's
+offensive or IDP unit (.40). The Analytics page keeps the defence-only view so
+teams remain directly comparable; player-facing scores include the unit context.
+
+The weights were selected on leakage-safe 2024 observations and evaluated once
+on a 2025 holdout. Value's next-week rank correlation improved from .610 to
+.653; contextual matchup correlation improved from .088 to .235. Run
+`npm run research` to reproduce the full signal report.
 
 ## Pages
 
@@ -103,6 +111,10 @@ npm run dev
 
 ```bash
 npm run verify
+```
+
+```bash
+npm run research
 ```
 
 ```bash

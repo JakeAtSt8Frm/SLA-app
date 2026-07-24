@@ -91,6 +91,7 @@ export interface WeekData {
   stats: Record<string, StatLine>;
   projections: Record<string, StatLine>;
   opponents: Record<string, string>;
+  teams: Record<string, string>;
   matchups: Matchup[];
 }
 
@@ -298,6 +299,7 @@ export async function loadLeague(
         stats: stats.stats,
         projections: projections.stats,
         opponents: stats.opponents,
+        teams: stats.teams,
         matchups,
       });
 
@@ -317,10 +319,12 @@ export async function loadLeague(
   const weekStats = new Map<number, Record<string, StatLine>>();
   const weekProjections = new Map<number, Record<string, StatLine>>();
   const weekOpponents = new Map<number, Record<string, string>>();
+  const weekTeams = new Map<number, Record<string, string>>();
   for (const [week, data] of weeks) {
     weekStats.set(week, data.stats);
     weekProjections.set(week, data.projections);
     weekOpponents.set(week, data.opponents);
+    weekTeams.set(week, data.teams);
   }
 
   // Ownership data only exists for the live week; it's a tiny input, so a
@@ -335,6 +339,12 @@ export async function loadLeague(
     playersById,
     weekStats,
     weekProjections,
+    weekOpponents,
+    weekTeams,
+    forecastProjections:
+      nflState.season === season
+        ? weeks.get(Math.min(maxWeek, currentWeek + 1))?.projections
+        : undefined,
     research,
     throughWeek: currentWeek,
   });
@@ -346,6 +356,7 @@ export async function loadLeague(
     playersById,
     weekStats,
     weekOpponents,
+    weekTeams,
     throughWeek: currentWeek,
   });
 

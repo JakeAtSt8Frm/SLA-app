@@ -62,7 +62,7 @@ export function ValueChip({ score }: { score: number | null }) {
   );
 }
 
-/** Matchup Score chip (0–100). Higher means a softer defence to face. */
+/** Matchup Score chip (0–100). Higher means a more favorable matchup. */
 export function MatchupChip({ score }: { score: number | null }) {
   const { mode } = useTheme();
   const { background, ink } = matchupScoreFill(score, mode);
@@ -74,7 +74,7 @@ export function MatchupChip({ score }: { score: number | null }) {
       title={
         score === null
           ? 'No matchup data'
-          : `Matchup ${score} of 100 — softer than ${Math.round(score)}% of defences`
+          : `Matchup rating ${Math.round(score)} of 100`
       }
     >
       {score === null ? '—' : Math.round(score)}

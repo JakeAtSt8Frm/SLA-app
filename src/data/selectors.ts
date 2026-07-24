@@ -54,19 +54,20 @@ export function enrichPlayer(
 
   const player = data.playersById.get(pid);
   const group = groupForPlayer(player);
+  const playerTeam = (weekData?.teams[pid] ?? player?.team ?? '').toUpperCase();
 
   const proj = data.score(projLine);
   const act = data.score(statLine);
   const played = hasPlayed(statLine);
 
-  const matchup = data.matchupIndex.get(group, opponent);
+  const matchup = data.matchupIndex.get(group, opponent, playerTeam);
   const matchupScore = matchup?.score ?? null;
 
   return {
     pid,
     player: player ?? { player_id: pid },
     name: playerName(player, pid),
-    team: (player?.team ?? '').toUpperCase(),
+    team: playerTeam,
     group,
     slot,
     isStarter,

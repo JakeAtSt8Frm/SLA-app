@@ -2,14 +2,14 @@
  * Player Value Score (0–1000).
  *
  * A season-long, in-season valuation of a player built entirely from custom-
- * scored production. The model blends 18 normalised signals, every one of which
+ * scored production. The model blends 11 normalised signals, every one of which
  * is a percentile *within the player's own position group* — a 900-value LB and
  * a 900-value WR are both "top of their pool", not comparable in raw points.
  *
  * Design rules carried over from the original model, and worth preserving:
- *  - On-field production dominates. Rank-based terms carry the most weight.
- *  - Reliability (availability, consistency, floor) refines the score.
- *  - Market signal is deliberately tiny — it's a tie-breaker, not a driver.
+ *  - On-field production and recency dominate.
+ *  - Workload share and recent snaps capture the stability of the player's role.
+ *  - Forecasts contribute without overriding demonstrated production.
  *  - Age is excluded: this is an in-season value model, not a dynasty ranking.
  *  - Small samples are blended toward neutral rather than crushed to zero.
  */
@@ -24,29 +24,22 @@ import {
   snapPct,
   type ScoringModel,
 } from './scoring';
-import { clamp01, percentileRanks, quantile, rankScore, round, stdev } from './stats';
+import { clamp01, percentileRanks, quantile, round, stdev } from './stats';
 import type { Player, PositionGroup, RankInfo, ResearchEntry, StatLine } from './types';
 
 /** Weights applied to the normalised 0..1 signals. These sum to ~1.0. */
 export const VALUE_WEIGHTS = {
-  ppgRank: 0.18, // PPG rank within position group — highest priority
-  totalRank: 0.14, // Total-points rank — durability context
-  ppg: 0.055, // Raw PPG percentile
-  total: 0.045, // Raw total-points percentile
-  last8: 0.08, // Recent production window
-  recency: 0.035, // Last-8 vs season momentum (sample-adjusted)
-  availability: 0.08, // Share of weeks actually played
-  consistency: 0.06, // Low week-to-week volatility
-  floor: 0.04, // 25th-percentile week
-  ceiling: 0.03, // 85th-percentile week
-  boomBust: 0.02, // Boom rate minus bust rate
-  delta: 0.03, // Outperformance vs projection
-  usage: 0.05, // Opportunity volume
-  efficiency: 0.04, // Points per opportunity
-  market: 0.005, // Ownership/start rate — tiny tie-breaker
-  usageTrend: 0.015, // Direction of recent volume
-  last4: 0.01, // Very recent short window
-  snaps: 0.015, // Snap share
+  ppg: 0.22,
+  scheduleAdjusted: 0.07,
+  ewma: 0.16,
+  last4: 0.08,
+  forecast: 0.14,
+  opportunityShare: 0.12,
+  recentSnaps: 0.11,
+  usage: 0.04,
+  availability: 0.02,
+  floor: 0.03,
+  efficiency: 0.01,
 } as const;
 
 /** Boom/bust thresholds. Configurable in settings; these are the defaults. */
@@ -61,9 +54,12 @@ export interface ValueBreakdown {
   group: PositionGroup;
   games: number;
   ppg: number;
+  scheduleAdjustedPpg: number;
   total: number;
   last4: number;
   last8: number;
+  ewma: number;
+  forecastProjection: number | null;
   availability: number;
   consistency: number;
   floor: number;
@@ -73,9 +69,12 @@ export interface ValueBreakdown {
   deltaAvg: number;
   deltaBeatRate: number;
   usagePerGame: number | null;
+  opportunityShare: number | null;
+  recentOpportunityShare: number | null;
   usageTrend: number;
   efficiency: number | null;
   snapPct: number | null;
+  recentSnapPct: number | null;
   ownedPct: number | null;
   startedPct: number | null;
   /** Confidence multiplier applied for small samples (0.45..1.0). */
@@ -102,6 +101,7 @@ export interface ValueIndex {
 
 interface Accumulator {
   total: number;
+  scheduleAdjustedTotal: number;
   games: number;
   weekScores: number[];
   weeklyDetail: Array<{ week: number; actual: number; projected: number | null }>;
@@ -114,9 +114,13 @@ interface Accumulator {
   deltaN: number;
   snapSum: number;
   snapN: number;
+  snapSeries: number[];
   oppSum: number;
   oppN: number;
   oppSeries: number[];
+  shareSum: number;
+  shareN: number;
+  shareSeries: number[];
   effSum: number;
   effN: number;
 }
@@ -124,6 +128,7 @@ interface Accumulator {
 function newAccumulator(): Accumulator {
   return {
     total: 0,
+    scheduleAdjustedTotal: 0,
     games: 0,
     weekScores: [],
     weeklyDetail: [],
@@ -136,12 +141,35 @@ function newAccumulator(): Accumulator {
     deltaN: 0,
     snapSum: 0,
     snapN: 0,
+    snapSeries: [],
     oppSum: 0,
     oppN: 0,
     oppSeries: [],
+    shareSum: 0,
+    shareN: 0,
+    shareSeries: [],
     effSum: 0,
     effN: 0,
   };
+}
+
+/** Exponentially weighted mean, newest week first, validated at 0.68 decay. */
+function weightedRecent(values: number[], decay = 0.68): number {
+  if (!values.length) return 0;
+  let total = 0;
+  let weights = 0;
+  let weight = 1;
+  for (let index = values.length - 1; index >= 0; index--) {
+    total += values[index] * weight;
+    weights += weight;
+    weight *= decay;
+  }
+  return weights ? total / weights : 0;
+}
+
+function meanLast(values: number[], size: number): number {
+  const recent = values.slice(-size);
+  return recent.reduce((sum, value) => sum + value, 0) / recent.length;
 }
 
 export interface BuildValueIndexInput {
@@ -150,6 +178,9 @@ export interface BuildValueIndexInput {
   /** week number -> pid -> stat line */
   weekStats: Map<number, Record<string, StatLine>>;
   weekProjections: Map<number, Record<string, StatLine>>;
+  weekOpponents?: Map<number, Record<string, string>>;
+  weekTeams?: Map<number, Record<string, string>>;
+  forecastProjections?: Record<string, StatLine>;
   /** Current-week ownership data, optional. */
   research?: Record<string, ResearchEntry> | null;
   throughWeek: number;
@@ -168,6 +199,9 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
     playersById,
     weekStats,
     weekProjections,
+    weekOpponents,
+    weekTeams,
+    forecastProjections,
     research,
     throughWeek,
     config = DEFAULT_BOOM_BUST,
@@ -175,12 +209,58 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
 
   const score = createScorer(scoringModel);
   const agg = new Map<string, Accumulator>();
+  const teamOpportunityTotals = new Map<string, number>();
+  const groupScoreTotals = new Map<PositionGroup, { sum: number; count: number }>();
+  const defenseScoreTotals = new Map<string, { sum: number; count: number }>();
+
+  // Precompute position-group workload totals so a player's role is measured
+  // as a share of his own unit. The same pass measures opponent difficulty
+  // from the mean individual performance each defence has allowed.
+  for (let week = 1; week <= throughWeek; week++) {
+    const stats = weekStats.get(week) ?? {};
+    const teams = weekTeams?.get(week) ?? {};
+    const opponents = weekOpponents?.get(week) ?? {};
+    for (const [pid, line] of Object.entries(stats)) {
+      if (!hasPlayed(line)) continue;
+      const group = groupForPlayer(playersById.get(pid));
+      if (!group) continue;
+
+      const actual = score(line);
+      const groupTotal = groupScoreTotals.get(group) ?? { sum: 0, count: 0 };
+      groupTotal.sum += actual;
+      groupTotal.count++;
+      groupScoreTotals.set(group, groupTotal);
+
+      const opponent = opponents[pid];
+      if (opponent) {
+        const defenseKey = `${group}:${opponent}`;
+        const defenseTotal = defenseScoreTotals.get(defenseKey) ?? { sum: 0, count: 0 };
+        defenseTotal.sum += actual;
+        defenseTotal.count++;
+        defenseScoreTotals.set(defenseKey, defenseTotal);
+      }
+
+      const team = teams[pid];
+      if (team) {
+        const volume = opportunities(group, line);
+        if (volume !== null) {
+          const totalKey = `${week}:${team}:${group}`;
+          teamOpportunityTotals.set(
+            totalKey,
+            (teamOpportunityTotals.get(totalKey) ?? 0) + volume,
+          );
+        }
+      }
+    }
+  }
 
   // ---- Pass 1: accumulate per-player season aggregates ---------------------
   for (let week = 1; week <= throughWeek; week++) {
     const stats = weekStats.get(week);
     if (!stats) continue;
     const projections = weekProjections.get(week) ?? {};
+    const teams = weekTeams?.get(week) ?? {};
+    const opponents = weekOpponents?.get(week) ?? {};
 
     for (const pid of Object.keys(stats)) {
       const line = stats[pid];
@@ -198,6 +278,17 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
 
       const actual = score(line);
       a.total += actual;
+      const groupTotal = groupScoreTotals.get(group);
+      const defenseTotal = defenseScoreTotals.get(`${group}:${opponents[pid]}`);
+      const leagueMean =
+        groupTotal && groupTotal.count > 0 ? groupTotal.sum / groupTotal.count : 0;
+      const defenseMean =
+        defenseTotal && defenseTotal.count > 0 ? defenseTotal.sum / defenseTotal.count : 0;
+      const difficulty =
+        leagueMean > 0 && defenseMean > 0
+          ? Math.max(0.65, Math.min(1.35, defenseMean / leagueMean))
+          : 1;
+      a.scheduleAdjustedTotal += actual / difficulty;
       a.games += 1;
       a.weekScores.push(actual);
 
@@ -224,6 +315,7 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
       if (snaps !== null) {
         a.snapSum += snaps;
         a.snapN += 1;
+        a.snapSeries.push(snaps);
       }
 
       const opps = opportunities(group, line);
@@ -231,6 +323,15 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
         a.oppSum += opps;
         a.oppN += 1;
         a.oppSeries.push(opps);
+
+        const team = teams[pid];
+        const teamTotal = team ? teamOpportunityTotals.get(`${week}:${team}:${group}`) : 0;
+        if (teamTotal && teamTotal > 0) {
+          const share = opps / teamTotal;
+          a.shareSum += share;
+          a.shareN += 1;
+          a.shareSeries.push(share);
+        }
       }
 
       const eff = efficiency(group, line, actual);
@@ -248,9 +349,11 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
     games: number;
     total: number;
     ppg: number;
+    scheduleAdjustedPpg: number;
     last4: number;
     last8: number;
-    recencyAdj: number;
+    ewma: number;
+    forecastRaw: number | null;
     availability: number;
     floor: number;
     ceiling: number;
@@ -260,7 +363,10 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
     boomBustAdj: number;
     snapAdj: number;
     snapRaw: number | null;
+    recentSnapRaw: number | null;
     oppPerGame: number | null;
+    shareRaw: number | null;
+    recentShareRaw: number | null;
     oppTrend: number;
     effAvg: number | null;
     marketAdj: number;
@@ -281,18 +387,18 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
     if (!group) continue;
 
     const ppg = a.total / a.games;
+    const scheduleAdjustedPpg = a.scheduleAdjustedTotal / a.games;
 
     const recent4 = a.lastActs.slice(-4);
     const last4 = recent4.length ? recent4.reduce((x, y) => x + y, 0) / recent4.length : ppg;
     const last8 = a.lastActs.length
       ? a.lastActs.reduce((x, y) => x + y, 0) / a.lastActs.length
       : ppg;
-
-    // Momentum, pulled toward neutral when the recent sample is thin.
-    const recentSample = clamp01(a.lastActs.length / 8);
-    const recencyRatio = ppg > 0 ? last8 / ppg : 1;
-    const recencyNorm = clamp01((recencyRatio - 0.75) / 0.5); // 0.75x -> 0, 1.25x -> 1
-    const recencyAdj = 0.5 + (recencyNorm - 0.5) * recentSample;
+    const ewma = weightedRecent(a.weekScores);
+    const forecastLine = forecastProjections?.[pid];
+    // Historical PPG is the honest fallback when no live projection exists;
+    // treating an unprojected player as neutral erased useful demonstrated form.
+    const forecastRaw = hasValidProjection(forecastLine) ? score(forecastLine) : ppg;
 
     const availability = throughWeek > 0 ? clamp01(a.games / throughWeek) : 0;
     const floor = quantile(a.weekScores, 0.25);
@@ -309,8 +415,17 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
 
     const snapRaw = a.snapN > 0 ? a.snapSum / a.snapN : null;
     const snapAdj = snapRaw === null ? 0.5 : clamp01(snapRaw / 100);
+    const recentSnapRaw =
+      a.snapSeries.length > 0
+        ? meanLast(a.snapSeries, 2)
+        : null;
 
     const oppPerGame = a.oppN > 0 ? a.oppSum / a.oppN : null;
+    const shareRaw = a.shareN > 0 ? a.shareSum / a.shareN : null;
+    const recentShareRaw =
+      a.shareSeries.length > 0
+        ? meanLast(a.shareSeries, 2)
+        : null;
     let oppTrend = 0;
     if (oppPerGame !== null && oppPerGame > 0 && a.oppSeries.length >= 2) {
       const last2 = a.oppSeries.slice(-2);
@@ -341,9 +456,11 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
       games: a.games,
       total: a.total,
       ppg,
+      scheduleAdjustedPpg,
       last4,
       last8,
-      recencyAdj,
+      ewma,
+      forecastRaw,
       availability,
       floor,
       ceiling,
@@ -353,7 +470,10 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
       boomBustAdj,
       snapAdj,
       snapRaw,
+      recentSnapRaw,
       oppPerGame,
+      shareRaw,
+      recentShareRaw,
       oppTrend,
       effAvg,
       marketAdj,
@@ -377,7 +497,6 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
 
   const ppgRanks = new Map<string, RankInfo>();
   const totalRanks = new Map<string, RankInfo>();
-  const groupCounts = new Map<PositionGroup, { ppg: number; total: number }>();
 
   for (const [group, pids] of byGroup) {
     const ppgEligible = pids
@@ -408,7 +527,6 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
       });
     });
 
-    groupCounts.set(group, { ppg: ppgEligible.length, total: totalEligible.length });
   }
 
   const byPlayer = new Map<string, PlayerValue>();
@@ -425,43 +543,35 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
     };
 
     const pPpg = pct((d) => d.ppg);
-    const pTotal = pct((d) => d.total);
-    const pLast8 = pct((d) => d.last8);
+    const pScheduleAdjusted = pct((d) => d.scheduleAdjustedPpg);
     const pLast4 = pct((d) => d.last4);
+    const pEwma = pct((d) => d.ewma);
+    const pForecast = pct((d) => d.forecastRaw);
     const pFloor = pct((d) => d.floor);
-    const pCeil = pct((d) => d.ceiling);
     const pAvail = pct((d) => d.availability);
-    const pDelta = pct((d) => d.deltaAvg);
     const pUsage = pct((d) => d.oppPerGame);
+    const pShare = pct((d) => d.recentShareRaw);
     const pEff = pct((d) => d.effAvg);
-    const pTrend = pct((d) => d.oppTrend);
-
-    const counts = groupCounts.get(group)!;
+    const pRecentSnaps = pct((d) => d.recentSnapRaw);
 
     for (const d of rows) {
-      const ppgRank = ppgRanks.get(d.pid);
-      const totalRank = totalRanks.get(d.pid);
-
       // Each entry: [label, weight, normalised 0..1 signal]
       const terms: Array<[string, number, number]> = [
-        ['PPG rank', VALUE_WEIGHTS.ppgRank, rankScore(ppgRank?.rank, counts.ppg)],
-        ['Total rank', VALUE_WEIGHTS.totalRank, rankScore(totalRank?.rank, counts.total)],
         ['PPG', VALUE_WEIGHTS.ppg, pPpg.get(d.pid) ?? 0.5],
-        ['Total points', VALUE_WEIGHTS.total, pTotal.get(d.pid) ?? 0.5],
-        ['Last 8', VALUE_WEIGHTS.last8, pLast8.get(d.pid) ?? 0.5],
-        ['Momentum', VALUE_WEIGHTS.recency, d.recencyAdj],
+        [
+          'Schedule-adjusted PPG',
+          VALUE_WEIGHTS.scheduleAdjusted,
+          pScheduleAdjusted.get(d.pid) ?? 0.5,
+        ],
+        ['Weighted recent form', VALUE_WEIGHTS.ewma, pEwma.get(d.pid) ?? 0.5],
+        ['Last 4', VALUE_WEIGHTS.last4, pLast4.get(d.pid) ?? 0.5],
+        ['Current projection', VALUE_WEIGHTS.forecast, pForecast.get(d.pid) ?? 0.5],
+        ['Team opportunity share', VALUE_WEIGHTS.opportunityShare, pShare.get(d.pid) ?? 0.5],
+        ['Recent snap share', VALUE_WEIGHTS.recentSnaps, pRecentSnaps.get(d.pid) ?? 0.5],
         ['Availability', VALUE_WEIGHTS.availability, pAvail.get(d.pid) ?? 0.5],
-        ['Consistency', VALUE_WEIGHTS.consistency, d.consistency],
         ['Floor', VALUE_WEIGHTS.floor, pFloor.get(d.pid) ?? 0.5],
-        ['Ceiling', VALUE_WEIGHTS.ceiling, pCeil.get(d.pid) ?? 0.5],
-        ['Boom/bust', VALUE_WEIGHTS.boomBust, d.boomBustAdj],
-        ['Beats projection', VALUE_WEIGHTS.delta, pDelta.get(d.pid) ?? 0.5],
         ['Usage', VALUE_WEIGHTS.usage, pUsage.get(d.pid) ?? 0.5],
         ['Efficiency', VALUE_WEIGHTS.efficiency, pEff.get(d.pid) ?? 0.5],
-        ['Market', VALUE_WEIGHTS.market, d.marketAdj],
-        ['Usage trend', VALUE_WEIGHTS.usageTrend, pTrend.get(d.pid) ?? 0.5],
-        ['Last 4', VALUE_WEIGHTS.last4, pLast4.get(d.pid) ?? 0.5],
-        ['Snap share', VALUE_WEIGHTS.snaps, d.snapAdj],
       ];
 
       let raw = 0;
@@ -474,7 +584,7 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
       // Small-sample handling: blend toward neutral instead of crushing the
       // score, so a player with 2 great games isn't ranked above a proven one
       // but also isn't buried.
-      const gamesConfidence = 0.45 + 0.55 * clamp01((d.games - 1) / 5);
+      const gamesConfidence = 0.7 + 0.3 * clamp01(d.games - 1);
       raw = 0.5 + (raw - 0.5) * gamesConfidence;
 
       const finalScore = Math.round(clamp01(raw) * 1000);
@@ -487,9 +597,12 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
           group,
           games: d.games,
           ppg: round(d.ppg),
+          scheduleAdjustedPpg: round(d.scheduleAdjustedPpg),
           total: round(d.total),
           last4: round(d.last4),
           last8: round(d.last8),
+          ewma: round(d.ewma),
+          forecastProjection: d.forecastRaw === null ? null : round(d.forecastRaw),
           availability: round(d.availability, 3),
           consistency: round(d.consistency, 3),
           floor: round(d.floor),
@@ -499,9 +612,13 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
           deltaAvg: round(d.deltaAvg),
           deltaBeatRate: round(d.deltaBeatAdj, 3),
           usagePerGame: d.oppPerGame === null ? null : round(d.oppPerGame, 1),
+          opportunityShare: d.shareRaw === null ? null : round(d.shareRaw, 3),
+          recentOpportunityShare:
+            d.recentShareRaw === null ? null : round(d.recentShareRaw, 3),
           usageTrend: round(d.oppTrend, 3),
           efficiency: d.effAvg === null ? null : round(d.effAvg, 2),
           snapPct: d.snapRaw === null ? null : round(d.snapRaw, 1),
+          recentSnapPct: d.recentSnapRaw === null ? null : round(d.recentSnapRaw, 1),
           ownedPct: d.owned,
           startedPct: d.started,
           gamesConfidence: round(gamesConfidence, 3),

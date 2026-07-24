@@ -52,7 +52,7 @@ export function PlayerModal({ pid, week, onClose }: Props) {
     const player = enrichPlayer(data, pid, week, '', false);
     const value = data.valueIndex.byPlayer.get(pid) ?? null;
     const weekly = data.valueIndex.weeklyScores.get(pid) ?? [];
-    const matchup = data.matchupIndex.get(player.group, player.opponent);
+    const matchup = data.matchupIndex.get(player.group, player.opponent, player.team);
 
     const chart = weekly.map((w) => ({
       week: `W${w.week}`,
@@ -165,8 +165,16 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                 <Metric label="Games" value={String(value.breakdown.games)} />
                 <Metric label="Total" value={fmt1(value.breakdown.total)} />
                 <Metric label="PPG" value={fmt1(value.breakdown.ppg)} />
+                <Metric
+                  label="Adjusted PPG"
+                  value={fmt1(value.breakdown.scheduleAdjustedPpg)}
+                />
                 <Metric label="Last 4" value={fmt1(value.breakdown.last4)} />
                 <Metric label="Last 8" value={fmt1(value.breakdown.last8)} />
+                <Metric label="Weighted form" value={fmt1(value.breakdown.ewma)} />
+                {value.breakdown.forecastProjection !== null && (
+                  <Metric label="Current projection" value={fmt1(value.breakdown.forecastProjection)} />
+                )}
                 <Metric label="Floor" value={fmt1(value.breakdown.floor)} sub="25th pct week" />
                 <Metric label="Ceiling" value={fmt1(value.breakdown.ceiling)} sub="85th pct week" />
                 <Metric
@@ -192,8 +200,20 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                     sub="opportunities"
                   />
                 )}
+                {value.breakdown.recentOpportunityShare !== null && (
+                  <Metric
+                    label="Team opportunity share"
+                    value={fmtPct(value.breakdown.recentOpportunityShare)}
+                  />
+                )}
                 {value.breakdown.snapPct !== null && (
                   <Metric label="Snap share" value={`${value.breakdown.snapPct.toFixed(0)}%`} />
+                )}
+                {value.breakdown.recentSnapPct !== null && (
+                  <Metric
+                    label="Recent snap share"
+                    value={`${value.breakdown.recentSnapPct.toFixed(0)}%`}
+                  />
                 )}
                 {value.breakdown.startedPct !== null && (
                   <Metric label="Start rate" value={`${value.breakdown.startedPct.toFixed(0)}%`} />
@@ -213,12 +233,23 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                 <Metric
                   label="Matchup score"
                   value={String(matchup.score)}
-                  sub={`softer than ${Math.round(matchup.score)}% of defences`}
                 />
+                <Metric label="Defence baseline" value={String(matchup.baseScore)} />
+                {matchup.unitStrengthScore !== null && (
+                  <Metric label="Unit strength" value={String(matchup.unitStrengthScore)} />
+                )}
                 <Metric
                   label="Allowed / game"
                   value={fmt1(matchup.pointsPerGame)}
                   sub={`to ${matchup.group}s`}
+                />
+                <Metric
+                  label="Adjusted allowed"
+                  value={fmt1(matchup.opponentAdjustedPpg)}
+                />
+                <Metric
+                  label="Opportunities allowed"
+                  value={fmt1(matchup.opportunitiesPerGame)}
                 />
                 <Metric label="Last 4" value={fmt1(matchup.last4)} />
                 <Metric

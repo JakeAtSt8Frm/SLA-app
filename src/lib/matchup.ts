@@ -3,7 +3,7 @@
  *
  * For every (position group, defensive team) pair we measure how many custom
  * points that defence has surrendered to that group, then convert it into a
- * 0–100 rating where 100 means "the softest possible matchup".
+ * 0–100 defence-only rating where 100 means "the softest possible matchup".
  *
  * This matters far more in this league than in a standard one: with three DL,
  * four LB and three DB starting every week and IDP events weighted heavily
@@ -18,9 +18,20 @@
  *   floor penalty how often it holds opponents to a bottom-quartile week
  *   consistency   inverse volatility — predictable defences are easier to trust
  *   top-10 bonus  how often it yields a leaguewide top-10 week at the position
+ *
+ * A player-facing lookup then adds the factors that proved predictive across
+ * the 2024 discovery season and 2025 holdout: schedule-adjusted concessions,
+ * opportunity volume allowed, and the strength of the attacking/IDP unit
+ * entering the matchup.
  */
 
-import { createScorer, groupForPlayer, hasPlayed, type ScoringModel } from './scoring';
+import {
+  createScorer,
+  groupForPlayer,
+  hasPlayed,
+  opportunities,
+  type ScoringModel,
+} from './scoring';
 import { clamp, mean, percentileRanks, quantile, round, stdev } from './stats';
 import type { Player, PositionGroup, StatLine } from './types';
 import { POSITION_GROUPS } from './types';
@@ -37,8 +48,16 @@ export interface MatchupBreakdown {
 export interface MatchupEntry {
   defense: string;
   group: PositionGroup;
-  /** 0–100. Higher = softer matchup = better for the offensive player. */
+  /** 0–100. Higher = a more favorable contextual matchup for this unit. */
   score: number;
+  /** Defence-only score before the attacking unit is considered. */
+  baseScore: number;
+  /** Percentile of schedule-adjusted points allowed. */
+  opponentAdjustedScore: number;
+  /** Percentile of opportunity volume allowed. */
+  opportunityScore: number;
+  /** Attacking/IDP unit strength percentile used by contextual lookups. */
+  unitStrengthScore: number | null;
   /**
    * The unnormalised component sum, before rescaling.
    *
@@ -48,6 +67,9 @@ export interface MatchupEntry {
   rawComposite: number;
   /** Custom points per game allowed to this position group. */
   pointsPerGame: number;
+  opponentAdjustedPpg: number;
+  opportunitiesPerGame: number;
+  efficiencyAllowed: number;
   last4: number;
   volatility: number;
   games: number;
@@ -64,7 +86,11 @@ export interface MatchupIndex {
   byGroup: Map<PositionGroup, Map<string, MatchupEntry>>;
   throughWeek: number;
   defenses: string[];
-  get(group: PositionGroup | null, defense: string | null | undefined): MatchupEntry | null;
+  get(
+    group: PositionGroup | null,
+    defense: string | null | undefined,
+    sourceTeam?: string | null,
+  ): MatchupEntry | null;
 }
 
 export interface BuildMatchupIndexInput {
@@ -74,6 +100,8 @@ export interface BuildMatchupIndexInput {
   weekStats: Map<number, Record<string, StatLine>>;
   /** week -> pid -> opponent team abbreviation. */
   weekOpponents: Map<number, Record<string, string>>;
+  /** week -> pid -> player's team abbreviation. */
+  weekTeams?: Map<number, Record<string, string>>;
   throughWeek: number;
 }
 
@@ -81,7 +109,7 @@ export interface BuildMatchupIndexInput {
 const TOP_N = 10;
 
 export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
-  const { scoringModel, playersById, weekStats, weekOpponents, throughWeek } = input;
+  const { scoringModel, playersById, weekStats, weekOpponents, weekTeams, throughWeek } = input;
   const score = createScorer(scoringModel);
 
   // group -> defense -> list of per-player-week scores conceded
@@ -92,12 +120,21 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
   const top10 = new Map<PositionGroup, Map<string, number>>();
   // group -> defense -> per-week totals conceded, for trend/volatility
   const weeklyTotals = new Map<PositionGroup, Map<string, Map<number, number>>>();
+  // group -> opponent -> per-week opportunity volume allowed
+  const weeklyOpportunities = new Map<PositionGroup, Map<string, Map<number, number>>>();
+  // group -> opponent -> week -> team producing the points
+  const weeklySourceTeams = new Map<PositionGroup, Map<string, Map<number, string>>>();
+  // group -> source team -> per-week points produced
+  const teamWeeklyTotals = new Map<PositionGroup, Map<string, Map<number, number>>>();
 
   for (const group of POSITION_GROUPS) {
     conceded.set(group, new Map());
     gamesFaced.set(group, new Map());
     top10.set(group, new Map());
     weeklyTotals.set(group, new Map());
+    weeklyOpportunities.set(group, new Map());
+    weeklySourceTeams.set(group, new Map());
+    teamWeeklyTotals.set(group, new Map());
   }
 
   const nested = <T>(m: Map<PositionGroup, Map<string, T>>, g: PositionGroup, d: string, init: () => T): T => {
@@ -114,9 +151,16 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
     const stats = weekStats.get(week);
     if (!stats) continue;
     const opponents = weekOpponents.get(week) ?? {};
+    const teams = weekTeams?.get(week) ?? {};
 
     // Collect this week's performances so we can find the top-N per group.
-    const weekRows: Array<{ group: PositionGroup; defense: string; points: number }> = [];
+    const weekRows: Array<{
+      group: PositionGroup;
+      defense: string;
+      sourceTeam: string;
+      points: number;
+      opportunities: number;
+    }> = [];
 
     for (const pid of Object.keys(stats)) {
       const line = stats[pid];
@@ -127,8 +171,11 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
 
       const defense = opponents[pid];
       if (!defense) continue;
+      const sourceTeam = teams[pid] ?? '';
+      const points = score(line);
+      const volume = opportunities(group, line) ?? 0;
 
-      weekRows.push({ group, defense, points: score(line) });
+      weekRows.push({ group, defense, sourceTeam, points, opportunities: volume });
     }
 
     // Per-group top-N for this week.
@@ -153,20 +200,62 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
 
       const wk = nested(weeklyTotals, row.group, row.defense, () => new Map<number, number>());
       wk.set(week, (wk.get(week) ?? 0) + row.points);
+
+      const volume = nested(
+        weeklyOpportunities,
+        row.group,
+        row.defense,
+        () => new Map<number, number>(),
+      );
+      volume.set(week, (volume.get(week) ?? 0) + row.opportunities);
+
+      if (row.sourceTeam) {
+        const sources = nested(
+          weeklySourceTeams,
+          row.group,
+          row.defense,
+          () => new Map<number, string>(),
+        );
+        sources.set(week, row.sourceTeam);
+
+        const teamTotals = nested(
+          teamWeeklyTotals,
+          row.group,
+          row.sourceTeam,
+          () => new Map<number, number>(),
+        );
+        teamTotals.set(week, (teamTotals.get(week) ?? 0) + row.points);
+      }
     }
   }
 
   // ---- Convert raw concessions into 0–100 ratings --------------------------
 
   const byGroup = new Map<PositionGroup, Map<string, MatchupEntry>>();
+  const unitStrengthScoresByGroup = new Map<PositionGroup, Map<string, number>>();
   const defenseSet = new Set<string>();
 
   for (const group of POSITION_GROUPS) {
     const perDefense = weeklyTotals.get(group)!;
     if (!perDefense.size) {
       byGroup.set(group, new Map());
+      unitStrengthScoresByGroup.set(group, new Map());
       continue;
     }
+
+    const teamStrengthRows = [...teamWeeklyTotals.get(group)!.entries()].map(
+      ([team, totals]) => ({
+        id: team,
+        value: mean([...totals.values()]),
+      }),
+    );
+    unitStrengthScoresByGroup.set(group, percentileRanks(teamStrengthRows));
+
+    const allWeeklyTotals = [...perDefense.values()].flatMap((weekMap) => [
+      ...weekMap.values(),
+    ]);
+    const leagueWeeklyMean = mean(allWeeklyTotals);
+    const teamStrength = new Map(teamStrengthRows.map((row) => [row.id, row.value]));
 
     // League-wide distribution of individual performances against this group,
     // used to define what counts as a ceiling or floor week.
@@ -185,6 +274,9 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
       ceilingRate: number;
       floorRate: number;
       top10Rate: number;
+      opponentAdjustedPpg: number;
+      opportunitiesPerGame: number;
+      efficiencyAllowed: number;
     }
 
     const rows: Row[] = [];
@@ -200,6 +292,15 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
       const last4Weeks = totals.slice(-4);
       const last4 = last4Weeks.length ? mean(last4Weeks) : ppg;
       const volatility = stdev(totals);
+      const volumeMap = weeklyOpportunities.get(group)!.get(defense) ?? new Map();
+      const opportunitiesPerGame = mean(weeks.map((week) => volumeMap.get(week) ?? 0));
+      const sourceMap = weeklySourceTeams.get(group)!.get(defense) ?? new Map();
+      const adjustedTotals = weeks.map((week) => {
+        const source = sourceMap.get(week);
+        const sourceStrength = source ? teamStrength.get(source) : undefined;
+        return weekMap.get(week)! - ((sourceStrength ?? leagueWeeklyMean) - leagueWeeklyMean);
+      });
+      const opponentAdjustedPpg = mean(adjustedTotals);
 
       // Ceiling/floor rates measured over individual performances allowed.
       const performances = conceded.get(group)!.get(defense) ?? [];
@@ -219,6 +320,9 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
         ceilingRate: performances.length ? ceilCount / performances.length : 0,
         floorRate: performances.length ? floorCount / performances.length : 0,
         top10Rate: games ? (top10.get(group)!.get(defense) ?? 0) / games : 0,
+        opponentAdjustedPpg,
+        opportunitiesPerGame,
+        efficiencyAllowed: ppg / Math.max(opportunitiesPerGame, 1),
       });
     }
 
@@ -229,6 +333,12 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
 
     const n = rows.length;
     const entries = new Map<string, MatchupEntry>();
+    const adjustedRanks = percentileRanks(
+      rows.map((row) => ({ id: row.defense, value: row.opponentAdjustedPpg })),
+    );
+    const opportunityRanks = percentileRanks(
+      rows.map((row) => ({ id: row.defense, value: row.opportunitiesPerGame })),
+    );
 
     // First compute the raw composite for every defence in this group.
     const composites: Array<{ id: string; value: number; parts: MatchupBreakdown }> = [];
@@ -274,7 +384,8 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
      *
      * Mapping the composite onto its own rank-percentile keeps every component's
      * influence on the ordering, guarantees a full 0..100 spread, and makes the
-     * number mean something concrete: "softer than X% of the league".
+     * number mean something concrete for the defence-only baseline:
+     * "softer than X% of the league".
      */
     const rescaled = percentileRanks(composites.map(({ id, value }) => ({ id, value })));
     const compositeById = new Map(composites.map((c) => [c.id, c]));
@@ -282,13 +393,22 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
     for (const r of rows) {
       const composite = compositeById.get(r.defense)!;
       const total = clamp((rescaled.get(r.defense) ?? 0.5) * 100, 0, 100);
+      const opponentAdjustedScore = (adjustedRanks.get(r.defense) ?? 0.5) * 100;
+      const opportunityScore = (opportunityRanks.get(r.defense) ?? 0.5) * 100;
 
       entries.set(r.defense, {
         defense: r.defense,
         group,
         score: round(total, 1),
+        baseScore: round(total, 1),
+        opponentAdjustedScore: round(opponentAdjustedScore, 1),
+        opportunityScore: round(opportunityScore, 1),
+        unitStrengthScore: null,
         rawComposite: round(composite.value, 1),
         pointsPerGame: round(r.ppg),
+        opponentAdjustedPpg: round(r.opponentAdjustedPpg),
+        opportunitiesPerGame: round(r.opportunitiesPerGame),
+        efficiencyAllowed: round(r.efficiencyAllowed, 3),
         last4: round(r.last4),
         volatility: round(r.volatility),
         games: r.games,
@@ -307,9 +427,33 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
     byGroup,
     throughWeek,
     defenses: [...defenseSet].sort(),
-    get(group, defense) {
+    get(group, defense, sourceTeam) {
       if (!group || !defense) return null;
-      return byGroup.get(group)?.get(String(defense).toUpperCase()) ?? null;
+      const entry = byGroup.get(group)?.get(String(defense).toUpperCase()) ?? null;
+      if (!entry || !sourceTeam) return entry;
+
+      const unitStrength =
+        unitStrengthScoresByGroup.get(group)?.get(String(sourceTeam).toUpperCase()) ?? null;
+      if (unitStrength === null) return entry;
+
+      /*
+       * Cross-season holdout weights:
+       *   35% existing defence composite
+       *   15% opponent-adjusted concessions
+       *   10% opportunity volume allowed
+       *   40% strength of the unit entering the matchup
+       */
+      const contextualScore =
+        entry.baseScore * 0.35 +
+        entry.opponentAdjustedScore * 0.15 +
+        entry.opportunityScore * 0.1 +
+        unitStrength * 100 * 0.4;
+
+      return {
+        ...entry,
+        score: round(clamp(contextualScore, 0, 100), 1),
+        unitStrengthScore: round(unitStrength * 100, 1),
+      };
     },
   };
 }
