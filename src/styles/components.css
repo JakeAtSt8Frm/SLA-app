@@ -111,12 +111,6 @@
   .topbar.is-hidden {
     transform: translateY(-100%);
   }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .topbar {
-    transition: none;
-  }
 
   .bottom-nav {
     position: fixed;
@@ -152,6 +146,12 @@
   .bottom-nav__icon {
     font-size: 17px;
     line-height: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar {
+    transition: none;
   }
 }
 
