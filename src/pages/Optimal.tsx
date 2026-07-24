@@ -11,8 +11,15 @@ import { useLeague, useLeagueData } from '../data/LeagueProvider';
 import { buildHeatmap, buildRosterWeek } from '../data/selectors';
 import { PlayerModal } from '../components/PlayerModal';
 import { Heatmap } from '../components/Heatmap';
-import { EmptyState, StatTile, StatTileRow, fmt1, fmtPct } from '../components/primitives';
+import {
+  EmptyState,
+  StatTile,
+  StatTileRow,
+  fmt1,
+  fmtPct,
+} from '../components/primitives';
 import { playerHeadshot, teamLogo } from '../lib/sleeper';
+import { fmtSlot } from '../lib/labels';
 import { playerName } from '../data/league';
 
 export function OptimalPage() {
@@ -121,7 +128,7 @@ export function OptimalPage() {
                   const wasStarted = a.pid ? startedIds.has(a.pid) : false;
                   return (
                     <tr key={`${a.slot}-${a.slotIndex}`}>
-                      <td className="tiny bold muted">{a.slot.replace(/_/g, ' ')}</td>
+                      <td className="tiny bold muted">{fmtSlot(a.slot)}</td>
                       <td>
                         {a.pid ? (
                           <button
@@ -186,7 +193,7 @@ export function OptimalPage() {
                       onClick={() => a.pid && setOpenPid(a.pid)}
                     >
                       <span className="row" style={{ gap: 8, minWidth: 0 }}>
-                        <span className="chip chip-outline">{a.slot.replace(/_/g, ' ')}</span>
+                        <span className="chip chip-outline">{fmtSlot(a.slot)}</span>
                         <span style={{ fontWeight: 600 }}>{playerName(player, a.pid!)}</span>
                       </span>
                       <span className="mono bold">{fmt1(a.points)}</span>

@@ -9,6 +9,7 @@
 
 import { useTheme } from './ThemeProvider';
 import { matchupScoreFill, rankFill, valueScoreFill } from '../lib/colors';
+import { fmtSlot } from '../lib/labels';
 import { statusTone } from '../lib/status';
 import type { PlayerStatus, RankInfo, StatusLabel } from '../lib/types';
 
@@ -181,7 +182,7 @@ export function PlacementBadge({ placement }: { placement: number | null }) {
 
 /** Position group badge. */
 export function PosBadge({ group, slot }: { group: string | null; slot?: string }) {
-  const text = slot && slot !== group ? slot.replace(/_/g, ' ') : (group ?? '—');
+  const text = slot && slot !== group ? fmtSlot(slot) : (group ?? '—');
   return (
     <span className="chip chip-outline" style={{ minWidth: 34, justifyContent: 'center' }}>
       {text}
