@@ -18,7 +18,7 @@ import {
 } from '../components/primitives';
 import { useTheme } from '../components/ThemeProvider';
 import { teamColor } from '../lib/colors';
-import { mean, quantile, round, stdev } from '../lib/stats';
+import { mean, quantile, round, stdev, topWeightedMean } from '../lib/stats';
 import { POSITION_GROUPS, type PositionGroup } from '../lib/types';
 
 interface AllPlayRecord {
@@ -162,24 +162,28 @@ export function AnalyticsPage() {
       for (const pid of team.roster.taxi ?? []) if (pid) ids.add(String(pid));
       for (const pid of team.roster.reserve ?? []) if (pid) ids.add(String(pid));
 
-      let sum = 0;
-      let count = 0;
-      const groupSum = emptyPositionTotals();
-      const groupCount = emptyPositionTotals();
+      const all: number[] = [];
+      const groupValues = Object.fromEntries(
+        POSITION_GROUPS.map((group) => [group, [] as number[]]),
+      ) as Record<PositionGroup, number[]>;
+
       for (const pid of ids) {
         const value = data.valueIndex.byPlayer.get(pid);
         if (!value) continue;
-        sum += value.score;
-        count += 1;
-        groupSum[value.group] += value.score;
-        groupCount[value.group] += 1;
+        all.push(value.score);
+        groupValues[value.group].push(value.score);
       }
 
+      // Overall stays a straight average across the whole roster — with 25-odd
+      // rated players, a single scrub barely moves it. A position group holds
+      // only a handful, so one awful value would swing a plain average wildly;
+      // there we lean on the team's best players at the position instead, so a
+      // deep group is never sunk by a lone low-value bench player.
       const byGroup = emptyPositionTotals();
       for (const group of POSITION_GROUPS) {
-        byGroup[group] = groupCount[group] > 0 ? groupSum[group] / groupCount[group] : 0;
+        byGroup[group] = topWeightedMean(groupValues[group]);
       }
-      map.set(team.rosterId, { overall: count > 0 ? sum / count : 0, byGroup });
+      map.set(team.rosterId, { overall: all.length ? mean(all) : 0, byGroup });
     }
 
     return map;
@@ -345,13 +349,13 @@ export function AnalyticsPage() {
           <p id="power-formula" className="sr-only">
             {powerScope === 'ALL'
               ? "Overall power is the average player Value Score across a team's entire roster, including bench, taxi and reserve. The bar is scaled so the strongest roster reads 100."
-              : `${powerScope} power is the average player Value Score of the ${powerScope}s a team rosters. The bar is scaled so the strongest reads 100.`}
+              : `${powerScope} power weights the player Value Scores of the ${powerScope}s a team rosters toward its best ones, so a deep group is not dragged down by a single low-value player. The bar is scaled so the strongest reads 100.`}
           </p>
           <div className="card-pad power-controls">
             <p className="small muted" style={{ margin: '0 0 10px' }}>
               {powerScope === 'ALL'
                 ? 'Average player value across the whole roster — depth included, not just starters.'
-                : `Average value of every ${powerScope} on the roster.`}
+                : `Weighted toward your best ${powerScope}s — depth counts, one low scrub doesn't drag you down.`}
             </p>
             <div className="segmented" role="group" aria-label="Power ranking scope">
               <button
@@ -404,7 +408,11 @@ export function AnalyticsPage() {
                   </span>
                   <span
                     className="power-value mono bold"
-                    title={`${Math.round(team.powerAverage)} average player value`}
+                    title={
+                      powerScope === 'ALL'
+                        ? `${Math.round(team.powerAverage)} average player value`
+                        : `${Math.round(team.powerAverage)} weighted value of best ${powerScope}s`
+                    }
                   >
                     {team.powerIndex.toFixed(1)}
                   </span>

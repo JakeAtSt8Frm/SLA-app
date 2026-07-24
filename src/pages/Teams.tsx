@@ -10,11 +10,12 @@
 import { useMemo, useState } from 'react';
 import { useLeague, useLeagueData } from '../data/LeagueProvider';
 import { buildHeatmap, buildRosterWeek, buildStarterStrength } from '../data/selectors';
+import type { TeamStarterStrength } from '../data/selectors';
 import { PlayerRow } from '../components/PlayerRow';
 import { PlayerModal } from '../components/PlayerModal';
 import { Heatmap } from '../components/Heatmap';
 import { useTheme } from '../components/ThemeProvider';
-import { rankFill } from '../lib/colors';
+import { rygColor } from '../lib/colors';
 import {
   EmptyState,
   PlacementBadge,
@@ -62,18 +63,24 @@ export function TeamsPage() {
 
   // Where this team's *starting lineup* ranks league-wide, overall and by
   // position — the starter-based counterpart to Analytics' whole-roster power.
+  // Each row carries both a rank (for colour) and a strength percentage of the
+  // league leader (for the bar length), mirroring the Analytics power list.
   const starterStrength = useMemo(() => buildStarterStrength(data), [data]);
   const starterRank = useMemo(() => {
     if (rosterId === null) return null;
     const outOf = starterStrength.length;
-    const rankBy = (pick: (t: (typeof starterStrength)[number]) => number) => {
-      const sorted = [...starterStrength].sort((a, b) => pick(b) - pick(a));
-      return sorted.findIndex((t) => t.rosterId === rosterId) + 1;
+    const build = (pick: (t: TeamStarterStrength) => number) => {
+      const values = starterStrength.map((t) => ({ rosterId: t.rosterId, v: pick(t) }));
+      const max = Math.max(1, ...values.map((x) => x.v));
+      const rank =
+        [...values].sort((a, b) => b.v - a.v).findIndex((x) => x.rosterId === rosterId) + 1;
+      const mine = values.find((x) => x.rosterId === rosterId)?.v ?? 0;
+      return { rank, pct: (mine / max) * 100 };
     };
     const byGroup = Object.fromEntries(
-      POSITION_GROUPS.map((group) => [group, rankBy((t) => t.positionAverages[group])]),
-    ) as Record<PositionGroup, number>;
-    return { overall: rankBy((t) => t.avg), outOf, byGroup };
+      POSITION_GROUPS.map((group) => [group, build((t) => t.positionAverages[group])]),
+    ) as Record<PositionGroup, { rank: number; pct: number }>;
+    return { outOf, overall: build((t) => t.avg), byGroup };
   }, [starterStrength, rosterId]);
 
   const heatmapRows = useMemo(
@@ -233,6 +240,9 @@ export function TeamsPage() {
           {starterRank && (
             <div className="card card-pad">
               <div className="section-title">Starter power rank</div>
+              <p className="small muted" style={{ margin: '0 0 12px' }}>
+                Where this lineup ranks among the league's {starterRank.outOf} teams.
+              </p>
               <StarterPowerRank rank={starterRank} mode={mode} />
             </div>
           )}
@@ -257,45 +267,56 @@ function ordinal(n: number): string {
 }
 
 /**
- * League rank of a team's starting lineup — overall and by position — on the
- * app's red→yellow→green scale, where first is green and last is red. The
- * numeral inside each chip is the non-colour channel, so the ranking is legible
- * without relying on hue.
+ * League rank of a team's starting lineup — overall and by position — drawn as
+ * the same bar list the Analytics power ranking uses. The bar length is the
+ * team's strength as a share of the league leader; its colour runs the app's
+ * red→yellow→green scale by rank (first green, last red), and the ordinal on the
+ * right is the non-colour channel so the ranking is legible without hue.
  */
 function StarterPowerRank({
   rank,
   mode,
 }: {
-  rank: { overall: number; outOf: number; byGroup: Record<PositionGroup, number> };
+  rank: {
+    outOf: number;
+    overall: { rank: number; pct: number };
+    byGroup: Record<PositionGroup, { rank: number; pct: number }>;
+  };
   mode: 'light' | 'dark';
 }) {
-  const chipStyle = (r: number) => {
-    const { background, ink } = rankFill(r, rank.outOf, mode);
-    return { background, color: ink };
-  };
+  const outOf = rank.outOf;
+  const rows = [
+    { key: 'ALL', label: 'Overall', ...rank.overall },
+    ...POSITION_GROUPS.map((group) => ({ key: group, label: group, ...rank.byGroup[group] })),
+  ];
 
   return (
-    <div className="stack" style={{ gap: 12 }}>
-      <div className="row" style={{ alignItems: 'center', gap: 10 }}>
-        <span className="small" style={{ flex: 1 }}>
-          Overall
-        </span>
-        <span className="rank-chip mono bold" style={chipStyle(rank.overall)}>
-          {ordinal(rank.overall)}
-          <span className="rank-chip__of"> of {rank.outOf}</span>
-        </span>
-      </div>
-
-      <div className="rank-grid">
-        {POSITION_GROUPS.map((group) => (
-          <div key={group} className="rank-grid__cell">
-            <span className="small muted">{group}</span>
-            <span className="rank-chip mono bold" style={chipStyle(rank.byGroup[group])}>
-              {ordinal(rank.byGroup[group])}
+    <div className="power-list power-list--compact">
+      {rows.map((row) => {
+        const t = outOf > 1 ? 1 - (row.rank - 1) / (outOf - 1) : 1;
+        const color = rygColor(t, mode);
+        return (
+          <div key={row.key} className="power-row power-row--compact">
+            <span className="power-team">{row.label}</span>
+            <span
+              className="power-track"
+              role="meter"
+              aria-label={`${row.label} starter rank`}
+              aria-valuemin={1}
+              aria-valuemax={outOf}
+              aria-valuenow={row.rank}
+            >
+              <span
+                className="power-fill"
+                style={{ width: `${Math.max(row.pct, 3)}%`, background: color }}
+              />
+            </span>
+            <span className="power-value mono bold" title={`${ordinal(row.rank)} of ${outOf}`}>
+              {ordinal(row.rank)}
             </span>
           </div>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }

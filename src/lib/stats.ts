@@ -16,6 +16,36 @@ export function mean(values: number[]): number {
   return sum / values.length;
 }
 
+/**
+ * A mean that leans on a pool's best values and lets its worst ones fade out.
+ *
+ * Values are sorted high-to-low and weighted by `decay^rank`: the top value
+ * counts fully, the second `decay` as much, the third `decay²`, and so on.
+ * Every value still contributes — the whole pool is included — but a single very
+ * low outlier lands at the bottom with a negligible weight and can't drag the
+ * result down.
+ *
+ * This is what a positional "power" should reward: a team with the best players
+ * at a position ranks top there, and isn't punished for also rostering a scrub
+ * at the same position. A plain average, by contrast, lets one awful value sink
+ * a group the team is otherwise deepest in.
+ */
+export function topWeightedMean(values: number[], decay = 0.6): number {
+  if (!values.length) return 0;
+  if (values.length === 1) return values[0];
+
+  const sorted = [...values].sort((a, b) => b - a);
+  let num = 0;
+  let den = 0;
+  let weight = 1;
+  for (const v of sorted) {
+    num += v * weight;
+    den += weight;
+    weight *= decay;
+  }
+  return den ? num / den : 0;
+}
+
 /** Linear-interpolated quantile over an unsorted array. */
 export function quantile(values: number[], q: number): number {
   if (!values.length) return 0;

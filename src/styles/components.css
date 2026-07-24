@@ -917,45 +917,19 @@
 /* ------------------------------------------------- starter power rank --- */
 
 /*
- * A rank chip carries its colour (red = last, green = first) *and* the numeral,
- * so it stays legible without depending on hue. The colour comes from the same
- * red→yellow→green ramp the heatmaps and value pills use.
+ * The roster page's starter power rank reuses the Analytics power-list bars.
+ * The compact variant drops the leading rank column and tightens spacing so the
+ * list of one team's positions fits the narrow roster-page aside: a position
+ * label, a strength bar (coloured red→yellow→green by rank), and the ordinal.
  */
-.rank-chip {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-  padding: 2px 9px;
-  border-radius: 999px;
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.rank-chip__of {
-  font-size: 11px;
-  font-weight: 600;
-  opacity: 0.8;
-}
-
-.rank-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
+.power-list--compact {
   gap: 8px;
 }
 
-.rank-grid__cell {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  padding: 8px 4px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-sunken);
+.power-row--compact {
+  grid-template-columns: 68px minmax(64px, 1fr) 44px;
 }
 
-@media (max-width: 560px) {
-  .rank-grid {
-    grid-template-columns: repeat(4, 1fr);
-  }
+.power-row--compact .power-team {
+  font-weight: 600;
 }
