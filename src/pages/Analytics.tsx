@@ -217,30 +217,61 @@ export function AnalyticsPage() {
       color: teamColor(team.rosterId, mode),
     }));
 
+    const records = new Map(
+      teams.map((team) => [
+        team.rosterId,
+        { wins: 0, losses: 0, ties: 0 },
+      ]),
+    );
+
     const points = Array.from({ length: data.currentWeek }, (_, index) => {
       const week = index + 1;
-      const scores = standings
-        .map((team) => ({
-          rosterId: team.rosterId,
-          score: team.weekly.find((row) => row.week === week)?.actual,
-        }))
-        .filter(
-          (row): row is { rosterId: number; score: number } => row.score !== undefined,
-        );
+      const matchups = data.weeks.get(week)?.matchups ?? [];
+      const games = new Map<number, typeof matchups>();
+
+      for (const matchup of matchups) {
+        if (matchup.matchup_id === null) continue;
+        const game = games.get(matchup.matchup_id) ?? [];
+        game.push(matchup);
+        games.set(matchup.matchup_id, game);
+      }
+
+      for (const game of games.values()) {
+        if (game.length !== 2) continue;
+        const [a, b] = game;
+        const aRecord = records.get(a.roster_id);
+        const bRecord = records.get(b.roster_id);
+        if (!aRecord || !bRecord) continue;
+
+        if (a.points === b.points) {
+          aRecord.ties++;
+          bRecord.ties++;
+        } else if (a.points > b.points) {
+          aRecord.wins++;
+          bRecord.losses++;
+        } else {
+          bRecord.wins++;
+          aRecord.losses++;
+        }
+      }
 
       const point: { week: string } & Record<string, string | number | null> = {
         week: `W${week}`,
       };
       for (const team of teams) {
-        const score = scores.find((row) => row.rosterId === team.rosterId)?.score;
+        const record = records.get(team.rosterId)!;
+        const standingWins = record.wins + record.ties * 0.5;
         point[team.dataKey] =
-          score === undefined ? null : 1 + scores.filter((row) => row.score > score).length;
+          1 +
+          [...records.values()].filter(
+            (other) => other.wins + other.ties * 0.5 > standingWins,
+          ).length;
       }
       return point;
     });
 
     return { teams, points };
-  }, [data.currentWeek, mode, power, standings]);
+  }, [data, mode, power]);
 
   const defenses = useMemo(() => {
     const entries = data.matchupIndex.byGroup.get(muGroup);
@@ -449,11 +480,14 @@ export function AnalyticsPage() {
               );
             })}
           </div>
-          <div className="card-pad power-trend">
-            <div className="power-trend__head">
-              <span className="bold">Weekly scoring rank</span>
-              <span className="tiny muted">1st is best · ties share a rank</span>
-            </div>
+        </section>
+
+        <section className="card" style={{ overflow: 'hidden' }}>
+          <div className="group-head group-head--primary">
+            <span>Weekly W/L rank</span>
+            <span className="mono">Cumulative · 1st is best</span>
+          </div>
+          <div className="card-pad">
             <LazyWeeklyTeamRankChart
               data={weeklyRanks.points}
               teams={weeklyRanks.teams}

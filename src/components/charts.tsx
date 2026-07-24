@@ -4,9 +4,9 @@
  * and nothing on first paint needs it, so it loads only when a chart is about
  * to render.
  *
- * Two series only, using categorical slots 1 and 2 from the validated palette.
- * A legend is always present, and every chart is paired with a table elsewhere
- * on the page so the data is never available by colour alone.
+ * Score charts use the validated series palette; the standings-rank chart uses
+ * the same stable team colours as the rest of the app. Every mark is paired
+ * with its series or team name so data is never available by colour alone.
  */
 
 import {
@@ -114,7 +114,7 @@ export function WeeklyScoreChart({
   );
 }
 
-/** Each team's scoring rank for every week, with first place at the top. */
+/** Each team's cumulative W/L rank for every week, with first place at the top. */
 export function WeeklyTeamRankChart({
   data,
   teams,
@@ -174,7 +174,7 @@ export function WeeklyTeamRankChart({
             {teams.map((team) => (
               <Line
                 key={team.rosterId}
-                type="linear"
+                type="monotone"
                 dataKey={team.dataKey}
                 name={team.name}
                 stroke={team.color}
