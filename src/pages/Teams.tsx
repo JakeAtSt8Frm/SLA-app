@@ -239,11 +239,8 @@ export function TeamsPage() {
 
           {starterRank && (
             <div className="card card-pad">
-              <div className="section-title">Starter power rank</div>
-              <p className="small muted" style={{ margin: '0 0 12px' }}>
-                Where this lineup ranks among the league's {starterRank.outOf} teams.
-              </p>
-              <StarterPowerRank rank={starterRank} mode={mode} />
+              <div className="section-title">Scoring rank by position</div>
+              <PositionScoringRank rank={starterRank} mode={mode} />
             </div>
           )}
         </div>
@@ -267,13 +264,14 @@ function ordinal(n: number): string {
 }
 
 /**
- * League rank of a team's starting lineup — overall and by position — drawn as
- * the same bar list the Analytics power ranking uses. The bar length is the
- * team's strength as a share of the league leader; its colour runs the app's
- * red→yellow→green scale by rank (first green, last red), and the ordinal on the
- * right is the non-colour channel so the ranking is legible without hue.
+ * Where a team's starters rank league-wide for points scored — overall and by
+ * position — drawn as the same bar list the Analytics power ranking uses. The
+ * bar length is the team's scoring as a share of the league leader; its colour
+ * runs the app's red→yellow→green scale by rank (first green, last red), and the
+ * ordinal on the right is the non-colour channel so the ranking is legible
+ * without hue.
  */
-function StarterPowerRank({
+function PositionScoringRank({
   rank,
   mode,
 }: {
@@ -301,7 +299,7 @@ function StarterPowerRank({
             <span
               className="power-track"
               role="meter"
-              aria-label={`${row.label} starter rank`}
+              aria-label={`${row.label} scoring rank`}
               aria-valuemin={1}
               aria-valuemax={outOf}
               aria-valuenow={row.rank}
