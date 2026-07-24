@@ -97,6 +97,10 @@ a {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
+  /* Lets contents (notably player rows) respond to the card's own width rather
+     than the viewport's — cards sit in columns of very different sizes. */
+  container-type: inline-size;
+  container-name: player-list;
 }
 
 .card-pad {

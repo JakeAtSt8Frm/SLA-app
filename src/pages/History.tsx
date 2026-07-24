@@ -128,7 +128,7 @@ export function HistoryPage() {
       <div className="stack">
         {/* ---- Season trend ---- */}
         <section className="card card-pad">
-          <div className="section-title">Weekly actual vs projected vs optimal</div>
+          <div className="section-title">Projected Score vs Actual Score vs Optimal, by week</div>
           <LazyWeeklyScoreChart data={season} height={280} showOptimal />
         </section>
 
@@ -168,27 +168,27 @@ export function HistoryPage() {
           </div>
         </div>
 
-        <div className="grid-2">
-          {weekDetail && (
-            <section className="card" style={{ overflow: 'hidden' }}>
-              <div className="group-head" style={{ position: 'static' }}>
-                <span>Week {historyWeek} starters</span>
-                <span className="mono">{fmt1(weekDetail.actualTotal)}</span>
-              </div>
-              {weekDetail.starters.map((p) => (
-                <PlayerRow key={p.pid} player={p} onSelect={setOpenPid} />
-              ))}
-            </section>
-          )}
+        {/* Roster runs full width — a player line needs the room for its name
+            plus the Value and rank pills. The heatmap sits below it. */}
+        {weekDetail && (
+          <section className="card" style={{ overflow: 'hidden' }}>
+            <div className="group-head group-head--primary">
+              <span>Week {historyWeek} starters</span>
+              <span className="mono">{fmt1(weekDetail.actualTotal)}</span>
+            </div>
+            {weekDetail.starters.map((p) => (
+              <PlayerRow key={p.pid} player={p} onSelect={setOpenPid} />
+            ))}
+          </section>
+        )}
 
-          <Heatmap
-            title={`${metric === 'actual' ? 'Actual' : 'Projected'} points by position — week ${historyWeek}`}
-            subtitle="Starting lineups, custom scoring."
-            rows={heatmapRows}
-            selectedRosterId={rosterId}
-            onSelectTeam={setSelectedRosterId}
-          />
-        </div>
+        <Heatmap
+          title={`${metric === 'actual' ? 'Actual' : 'Projected'} points by position — week ${historyWeek}`}
+          subtitle="Starting lineups. Colour compares teams within each column."
+          rows={heatmapRows}
+          selectedRosterId={rosterId}
+          onSelectTeam={setSelectedRosterId}
+        />
       </div>
 
       <PlayerModal pid={openPid} week={historyWeek} onClose={() => setOpenPid(null)} />

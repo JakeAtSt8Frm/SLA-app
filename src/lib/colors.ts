@@ -1,22 +1,25 @@
 /**
  * Colour encodings for every quantitative display in the app.
  *
- * The rules here are deliberate and worth not "improving" casually:
+ * Value Score and the heatmaps use a **red → yellow → green** scale, carried
+ * over from the original SLA app: red is bad, green is good, yellow is middling.
+ * This is the convention the league already reads fluently, and matching it was
+ * an explicit product decision.
  *
- *  - Heatmaps use a **diverging blue↔red ramp with a neutral grey midpoint**,
- *    because what a manager actually reads off them is "am I above or below the
- *    league at this position". The original app used red→yellow→green, which is
- *    the textbook red/green confusion case — roughly 1 in 12 men cannot read it.
- *  - Value Score uses a **single-hue sequential ramp** (magnitude, not polarity).
- *    The original mapped it to a red→green hue rotation, another rainbow.
- *  - Boom/bust wears the **reserved status palette** and always ships an icon and
- *    a text label, so colour is never the only channel carrying the meaning.
- *  - Every heatmap cell also prints its number, so the colour is reinforcement
- *    rather than the sole encoding.
+ * Red/green scales are hard to read with the most common forms of colour-vision
+ * deficiency, so every surface using one carries a second, non-colour channel:
  *
- * All values are drawn from the validated palette; the two-series chart pair
- * (#2a78d6/#eb6834 light, #3987e5/#d95926 dark) passes lightness, chroma, CVD
- * separation, normal-vision separation and 3:1 surface contrast in both modes.
+ *  - Every heatmap cell prints its own number, and each heatmap has a
+ *    Heatmap/Table toggle that drops the fills entirely.
+ *  - Value and matchup chips print their score inside the chip.
+ *  - Rank pills print "#11 Total" rather than relying on the tier colour.
+ *  - Boom/bust wears the reserved status palette *and* always ships an arrow
+ *    icon plus a text label.
+ *
+ * Chart series are the exception: those stay on the validated categorical pair
+ * (#2a78d6/#eb6834 light, #3987e5/#d95926 dark), which clears lightness, chroma,
+ * CVD separation and 3:1 surface contrast in both modes. Lines can't print their
+ * value at every point, so they need the safe palette.
  */
 
 import { clamp01 } from './stats';
@@ -146,28 +149,29 @@ export const SERIES = {
   dark: ['#3987e5', '#d95926', '#199e70'],
 } as const;
 
-/** Single-hue sequential ramp (blue), light→dark. Used for magnitude. */
-export const SEQUENTIAL_BLUE = [
-  '#cde2fb',
-  '#b7d3f6',
-  '#9ec5f4',
-  '#86b6ef',
-  '#6da7ec',
-  '#5598e7',
-  '#3987e5',
-  '#2a78d6',
-  '#256abf',
-  '#1c5cab',
-  '#184f95',
-  '#104281',
-  '#0d366b',
-] as const;
-
-/** Diverging poles and neutral midpoints, per mode. */
-const DIVERGING = {
-  light: { low: '#e34948', mid: '#f0efec', high: '#2a78d6' },
-  dark: { low: '#e66767', mid: '#383835', high: '#3987e5' },
+/**
+ * The red → yellow → green scale, per mode.
+ *
+ * `mid` is a true yellow rather than a neutral, matching the original app: the
+ * middle of the range reads as "average", not as "no data". Steps are
+ * interpolated in OKLab so the perceived brightness climbs smoothly instead of
+ * spiking through the yellow, which is what makes naive RGB red→green ramps
+ * look banded.
+ */
+const RYG = {
+  light: { low: '#d92d20', mid: '#e8a704', high: '#129d4e' },
+  dark: { low: '#f04438', mid: '#fac515', high: '#2bb673' },
 } as const;
+
+/**
+ * Samples the red→yellow→green scale at `t` (0 = worst, 1 = best).
+ * Exported so charts and legends can draw the same ramp.
+ */
+export function rygColor(t: number, mode: Mode): string {
+  const { low, mid, high } = RYG[mode];
+  const k = clamp01(t);
+  return k < 0.5 ? mixOklab(low, mid, k * 2) : mixOklab(mid, high, (k - 0.5) * 2);
+}
 
 /** Reserved status palette. Never themed, never reused for a series. */
 export const STATUS_COLORS = {
@@ -187,29 +191,26 @@ export interface HeatCell {
 }
 
 /**
- * Diverging heatmap fill.
+ * Heatmap cell fill on the red → yellow → green scale.
  *
- * `t` is the value's position within the column, already normalised to 0..1
- * with 0.5 meaning "at the league midpoint". Callers should normalise around
- * the median rather than the min so the neutral midpoint is meaningful.
+ * `t` is the value's position within its column, normalised to 0..1 with 0.5
+ * meaning "at the league median" — see `divergingPosition`. Centring on the
+ * median keeps yellow honest as "typical" even when one team has a runaway
+ * week and would otherwise drag a min/max scale.
  *
- * `emphasis` lifts the selected team's own row so it stands out without
- * changing its hue.
+ * Fills are washed toward the surface so the printed number stays legible on
+ * top; the selected team's row uses a stronger wash to stand out without
+ * changing hue.
  */
 export function heatmapCell(t: number, mode: Mode, emphasis = false): HeatCell {
-  const { low, mid, high } = DIVERGING[mode];
-  const k = clamp01(t);
+  const pure = rygColor(t, mode);
+  const surface = mode === 'dark' ? '#1a1a19' : '#fcfcfb';
 
-  // Each arm gets equal step count, meeting at the neutral midpoint.
-  const background =
-    k < 0.5 ? mixOklab(low, mid, k * 2) : mixOklab(mid, high, (k - 0.5) * 2);
+  // A full-strength fill behind every cell is overwhelming across a whole grid,
+  // so the colour is muted toward the surface and the selected row less so.
+  const background = mixOklab(pure, surface, emphasis ? 0.3 : 0.55);
 
-  // Selected row is pushed one notch further from the surface for emphasis.
-  const finalBg = emphasis
-    ? mixOklab(background, mode === 'dark' ? '#ffffff' : '#0b0b0b', 0.12)
-    : background;
-
-  return { background: finalBg, ink: inkFor(finalBg, mode) };
+  return { background, ink: inkFor(background, mode) };
 }
 
 /**
@@ -238,42 +239,53 @@ export function divergingPosition(value: number, column: number[]): number {
   return span <= 0 ? 0.5 : 0.5 + 0.5 * clamp01((value - mid) / span);
 }
 
+/** Neutral chip used whenever a score is missing. */
+function emptyChip(mode: Mode): HeatCell {
+  return {
+    background: mode === 'dark' ? '#2c2c2a' : '#e1e0d9',
+    ink: mode === 'dark' ? '#c3c2b7' : '#52514e',
+  };
+}
+
 /**
- * Sequential fill for a Value Score (0–1000).
+ * Value Score chip (0–1000) on the red → yellow → green scale.
  *
- * Rendered as a chip background with text in normal ink — the number itself is
- * never coloured, so it stays readable at every step of the ramp.
+ * Real scores cluster between roughly 420 and 850, so the ramp is anchored
+ * there rather than to the nominal 0–1000 range — otherwise every player would
+ * land in the same narrow band of green and the colour would say nothing.
  */
 export function valueScoreFill(score: number | null, mode: Mode): HeatCell {
-  if (score === null || !Number.isFinite(score)) {
-    return {
-      background: mode === 'dark' ? '#2c2c2a' : '#e1e0d9',
-      ink: mode === 'dark' ? '#c3c2b7' : '#52514e',
-    };
-  }
+  if (score === null || !Number.isFinite(score)) return emptyChip(mode);
 
-  // Real scores cluster between ~400 and ~850, so anchoring the ramp there uses
-  // the full colour range instead of wasting it on empty tails.
-  const t = clamp01((score - 420) / (850 - 420));
-  const idx = Math.round(t * (SEQUENTIAL_BLUE.length - 1));
-  const background = SEQUENTIAL_BLUE[idx];
-
+  const background = rygColor(clamp01((score - 420) / (850 - 420)), mode);
   return { background, ink: inkFor(background, mode) };
 }
 
 /**
- * Sequential fill for a Matchup Score (0–100), where 100 is the softest
- * matchup. Same ramp as Value so the two read as the same kind of quantity.
+ * Matchup Score chip (0–100), where 100 is the softest defence to face.
+ * Same scale as Value so the two read as the same kind of quantity.
  */
 export function matchupScoreFill(score: number | null, mode: Mode): HeatCell {
-  if (score === null || !Number.isFinite(score)) {
-    return {
-      background: mode === 'dark' ? '#2c2c2a' : '#e1e0d9',
-      ink: mode === 'dark' ? '#c3c2b7' : '#52514e',
-    };
-  }
+  if (score === null || !Number.isFinite(score)) return emptyChip(mode);
 
-  const idx = Math.round(clamp01(score / 100) * (SEQUENTIAL_BLUE.length - 1));
-  const background = SEQUENTIAL_BLUE[idx];
+  const background = rygColor(clamp01(score / 100), mode);
   return { background, ink: inkFor(background, mode) };
+}
+
+/**
+ * Positional rank pill colour.
+ *
+ * The original app tiered 32-team ranks at 8 / 16 / 24 — i.e. quartiles. Player
+ * pools here vary from a handful of kickers to 300+ receivers, so the tiers are
+ * expressed as quartiles of the pool instead, preserving the intent at any size.
+ */
+export function rankFill(rank: number, outOf: number, mode: Mode): HeatCell {
+  if (!rank || !outOf) return emptyChip(mode);
+
+  const quartile = clamp01(rank / outOf);
+  // Invert: rank 1 is the best, so it should land at the green end.
+  const background = rygColor(1 - quartile, mode);
+  const washed = mixOklab(background, mode === 'dark' ? '#1a1a19' : '#fcfcfb', 0.62);
+
+  return { background: washed, ink: inkFor(washed, mode) };
 }

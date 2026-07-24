@@ -1,15 +1,25 @@
 /**
  * A player as a row in a list.
  *
- * The original app used large cards. With 21 starting slots plus a 20-deep
- * bench, cards meant a lot of scrolling on a phone, so the default is a dense
- * row that still carries every number a card did: projection, actual, boom/bust
- * state, Value Score, matchup rating and positional rank. A card layout is
- * still available via `PlayerCard` for the compare and trade views.
+ * The original app used large cards. With 21 starting slots plus a deep bench,
+ * cards meant a lot of scrolling on a phone, so the default is a dense row that
+ * still carries every number a card did: projection, actual, boom/bust state,
+ * Value Score, matchup rating and positional ranks.
+ *
+ * Identity and standing sit together on the top line — name, then Value, then
+ * the rank pills — so a player can be judged without reading downward. The
+ * second line is only context (team, opponent).
  */
 
 import { playerHeadshot, teamLogo } from '../lib/sleeper';
-import { MatchupChip, PosBadge, StatusBadge, ValueChip, fmt1 } from './primitives';
+import {
+  MatchupChip,
+  PosBadge,
+  RankPill,
+  StatusBadge,
+  ValueChip,
+  fmt1,
+} from './primitives';
 import type { EnrichedPlayer } from '../lib/types';
 
 interface Props {
@@ -17,9 +27,32 @@ interface Props {
   onSelect?: (pid: string) => void;
   /** Show the projection column. Hidden on views that only report results. */
   showProjection?: boolean;
+  /** Extra context appended to the second line, e.g. the rostering team. */
+  note?: string | null;
 }
 
-export function PlayerRow({ player: p, onSelect, showProjection = true }: Props) {
+/** Headshot that falls back to the team logo, then hides itself. */
+function Avatar({ pid, team, size }: { pid: string; team: string; size: number }) {
+  return (
+    <img
+      src={playerHeadshot(pid)}
+      alt=""
+      width={size}
+      height={size}
+      loading="lazy"
+      className="avatar"
+      style={{ width: size, height: size }}
+      onError={(e) => {
+        const img = e.currentTarget;
+        const fallback = teamLogo(team);
+        if (fallback && img.src !== fallback) img.src = fallback;
+        else img.style.visibility = 'hidden';
+      }}
+    />
+  );
+}
+
+export function PlayerRow({ player: p, onSelect, showProjection = true, note }: Props) {
   const delta = p.hasPlayed && p.proj > 0 ? p.act - p.proj : null;
 
   return (
@@ -33,24 +66,17 @@ export function PlayerRow({ player: p, onSelect, showProjection = true }: Props)
     >
       <PosBadge group={p.group} slot={p.slot} />
 
-      <img
-        src={playerHeadshot(p.pid)}
-        alt=""
-        className="player-row__avatar"
-        loading="lazy"
-        onError={(e) => {
-          const img = e.currentTarget;
-          const fallback = teamLogo(p.team);
-          if (fallback && img.src !== fallback) img.src = fallback;
-          else img.style.visibility = 'hidden';
-        }}
-      />
+      <Avatar pid={p.pid} team={p.team} size={34} />
 
       <span className="player-row__id">
-        <span className="player-row__name">
-          {p.name}
+        <span className="player-row__title">
+          <span className="player-row__name">{p.name}</span>
+          <ValueChip score={p.valueScore} />
+          <RankPill rank={p.totalRank} kind="Total" />
+          <RankPill rank={p.ppgRank} kind="PPG" />
+          <MatchupChip score={p.matchupScore} />
           {p.isOut && (
-            <span className="chip" style={{ color: 'var(--danger-text)', marginLeft: 6 }}>
+            <span className="chip" style={{ color: 'var(--danger-text)' }}>
               OUT
             </span>
           )}
@@ -58,22 +84,17 @@ export function PlayerRow({ player: p, onSelect, showProjection = true }: Props)
         <span className="tiny muted">
           {p.team || '—'}
           {p.opponent ? ` vs ${p.opponent}` : ''}
-          {p.ppgRank ? ` · ${p.group}${p.ppgRank.rank} PPG` : ''}
+          {note ? ` · ${note}` : ''}
         </span>
       </span>
 
-      <span className="player-row__metrics">
-        <ValueChip score={p.valueScore} />
-        <MatchupChip score={p.matchupScore} />
-      </span>
-
       {showProjection && (
-        <span className="player-row__num mono" title="Projected custom score">
+        <span className="player-row__num mono" title="Projected Score">
           {fmt1(p.proj)}
         </span>
       )}
 
-      <span className="player-row__num mono bold" title="Actual custom score">
+      <span className="player-row__num mono bold" title="Actual Score">
         {p.hasPlayed ? fmt1(p.act) : '—'}
       </span>
 
@@ -98,18 +119,7 @@ export function PlayerCard({ player: p, onSelect }: Props) {
   return (
     <button type="button" onClick={() => onSelect?.(p.pid)} className="player-card">
       <div className="row" style={{ gap: 10 }}>
-        <img
-          src={playerHeadshot(p.pid)}
-          alt=""
-          className="player-card__avatar"
-          loading="lazy"
-          onError={(e) => {
-            const img = e.currentTarget;
-            const fallback = teamLogo(p.team);
-            if (fallback && img.src !== fallback) img.src = fallback;
-            else img.style.visibility = 'hidden';
-          }}
-        />
+        <Avatar pid={p.pid} team={p.team} size={42} />
         <div className="grow" style={{ minWidth: 0, textAlign: 'left' }}>
           <div className="bold" style={{ fontSize: 14, lineHeight: 1.3 }}>
             {p.name}
@@ -124,13 +134,13 @@ export function PlayerCard({ player: p, onSelect }: Props) {
 
       <div className="player-card__scores">
         <div>
-          <div className="tiny muted">Projected</div>
+          <div className="tiny muted">Projected Score</div>
           <div className="mono bold" style={{ fontSize: 18 }}>
             {fmt1(p.proj)}
           </div>
         </div>
         <div>
-          <div className="tiny muted">Actual</div>
+          <div className="tiny muted">Actual Score</div>
           <div className="mono bold" style={{ fontSize: 18 }}>
             {p.hasPlayed ? fmt1(p.act) : '—'}
           </div>
@@ -139,6 +149,8 @@ export function PlayerCard({ player: p, onSelect }: Props) {
 
       <div className="row wrap" style={{ gap: 6 }}>
         <ValueChip score={p.valueScore} />
+        <RankPill rank={p.totalRank} kind="Total" />
+        <RankPill rank={p.ppgRank} kind="PPG" />
         <MatchupChip score={p.matchupScore} />
         <StatusBadge status={p.status} />
       </div>

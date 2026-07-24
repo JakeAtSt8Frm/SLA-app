@@ -114,7 +114,7 @@ export function AnalyticsPage() {
       <div className="stack">
         {/* ---- Standings ---- */}
         <section className="card" style={{ overflow: 'hidden' }}>
-          <div className="group-head" style={{ position: 'static' }}>
+          <div className="group-head group-head--primary">
             <span>Standings &amp; scoring</span>
           </div>
           <div className="scroll-x">
@@ -161,7 +161,7 @@ export function AnalyticsPage() {
 
         {/* ---- Power ranking ---- */}
         <section className="card" style={{ overflow: 'hidden' }}>
-          <div className="group-head" style={{ position: 'static' }}>
+          <div className="group-head group-head--primary">
             <span>Power ranking</span>
             <span className="tiny">65% scoring · 35% record</span>
           </div>
@@ -202,7 +202,7 @@ export function AnalyticsPage() {
 
         {/* ---- Defensive generosity ---- */}
         <section className="card" style={{ overflow: 'hidden' }}>
-          <div className="group-head" style={{ position: 'static' }}>
+          <div className="group-head group-head--primary">
             <span>Matchup research — points allowed by defence</span>
           </div>
 

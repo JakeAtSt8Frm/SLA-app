@@ -61,12 +61,11 @@ rank base, recent trend, ceiling and floor rates, consistency and top-10 rate.
 | Page | What it answers |
 |---|---|
 | **Teams** | Roster by slot group, with a positional heatmap |
-| **Matchups** | Head-to-head lineups, live custom-scored totals |
 | **Optimal Lineup** | The best legal lineup, and what it cost to miss it |
+| **History** | Season trend: Projected vs Actual vs Optimal, week by week |
+| **Available Players** | Searchable browser over free agents and rostered players |
+| **Schedule** | The NFL week with rostered players, owners and custom scores overlaid |
 | **Analytics** | Standings, power ranking, defensive generosity research |
-| **History** | Season trend: actual vs projected vs optimal, week by week |
-| **Trade** | Trade impact judged on optimal-lineup change, not raw value |
-| **Players** | Searchable browser over free agents and rostered players |
 
 Any player is clickable for a detail sheet with a projected-vs-actual chart, a
 full season profile, a "why this Value Score" breakdown, and a week-by-week
@@ -83,10 +82,9 @@ These are deliberate corrections, not drift:
   100 and got clipped — in 2025 three defences tied at exactly 100.0 against QBs
   and two sat at 0.0, destroying the ordering exactly where it mattered. Scores
   are now the composite's rank-percentile, giving a full spread.
-- **Heatmaps are colourblind-safe.** The original used red→yellow→green, the
-  textbook red/green confusion case. This uses a diverging blue↔red ramp with a
-  neutral grey midpoint, centred on the league median, and every cell prints its
-  number so colour is never the only encoding.
+- **Heatmaps normalise around the league median.** The red→yellow→green scale is
+  kept from the original, but centred on the median rather than the min, so
+  yellow honestly means "typical" even when one team has a runaway week.
 - **Injury status no longer leaks across weeks.** Sleeper reports injury status
   as of *now*; applying it to a historical week listed players as "Out" in weeks
   they actually played.
@@ -132,3 +130,13 @@ A full season is ~11MB of JSON (17 weeks × stats + projections, plus a 2.5MB
 player dictionary). It's cached in IndexedDB with per-payload TTLs: completed
 weeks for 30 days, the live week for 2 minutes. Recharts is code-split, keeping
 first paint to ~98KB gzipped.
+
+## A note on the colour scale
+
+Value scores, rank pills and heatmaps use red → yellow → green, matching the
+original app. That scale is hard to read with the most common colour-vision
+deficiencies, so nothing depends on colour alone: every heatmap cell prints its
+value and offers a Table toggle, every chip prints its score, rank pills print
+"#11 Total", and boom/bust always ships an arrow icon plus a text label. Chart
+lines are the exception and use a CVD-validated categorical pair, since a line
+cannot label every point.

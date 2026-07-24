@@ -8,9 +8,9 @@
  */
 
 import { useTheme } from './ThemeProvider';
-import { matchupScoreFill, valueScoreFill } from '../lib/colors';
+import { matchupScoreFill, rankFill, valueScoreFill } from '../lib/colors';
 import { statusTone } from '../lib/status';
-import type { PlayerStatus, StatusLabel } from '../lib/types';
+import type { PlayerStatus, RankInfo, StatusLabel } from '../lib/types';
 
 /** Icon per status — the secondary channel that makes colour non-essential. */
 const STATUS_ICON: Record<StatusLabel, string> = {
@@ -74,6 +74,36 @@ export function MatchupChip({ score }: { score: number | null }) {
       }
     >
       {score === null ? '—' : Math.round(score)}
+    </span>
+  );
+}
+
+/**
+ * Positional rank pill, e.g. "#11 Total" or "#20 PPG".
+ *
+ * Tier colour comes from the rank's quartile within its own position pool, so a
+ * WR ranked 20th of 300 reads green while a kicker ranked 20th of 32 does not.
+ * The rank number is always printed, so the colour is reinforcement only.
+ */
+export function RankPill({ rank, kind }: { rank: RankInfo | null; kind: 'Total' | 'PPG' }) {
+  const { mode } = useTheme();
+  if (!rank) return null;
+
+  const { background, ink } = rankFill(rank.rank, rank.outOf, mode);
+
+  return (
+    <span
+      className="chip mono"
+      style={{ background, color: ink }}
+      title={`${rank.group} rank ${rank.rank} of ${rank.outOf} by ${
+        kind === 'PPG' ? 'points per game' : 'total points'
+      }`}
+    >
+      #{rank.rank}
+      {/* The word collapses to a single letter in narrow containers so the
+          pills still fit beside the name on a phone. */}
+      <span className="chip__long">{kind}</span>
+      <span className="chip__short">{kind === 'PPG' ? 'P' : 'T'}</span>
     </span>
   );
 }

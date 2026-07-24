@@ -138,7 +138,7 @@ export function PlayerModal({ pid, week, onClose }: Props) {
           {/* ---- Weekly projected vs actual ---- */}
           <section>
             <h3 className="section-title">
-              Weekly custom score — projected vs actual
+              Projected Score vs Actual Score, by week
             </h3>
 
             {chart.length === 0 ? (
@@ -202,50 +202,6 @@ export function PlayerModal({ pid, week, onClose }: Props) {
             </section>
           )}
 
-          {/* ---- Why this Value Score ---- */}
-          {value && (
-            <section>
-              <h3 className="section-title">
-                Why Value {value.score}
-              </h3>
-              <div className="small muted" style={{ marginBottom: 8 }}>
-                Each term is a percentile within {value.group}, times its weight.
-                {value.breakdown.gamesConfidence < 1 && (
-                  <>
-                    {' '}
-                    Small sample: blended {fmtPct(1 - value.breakdown.gamesConfidence)} toward
-                    neutral.
-                  </>
-                )}
-              </div>
-              <div className="scroll-x">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Signal</th>
-                      <th className="num">Weight</th>
-                      <th className="num">Percentile</th>
-                      <th className="num">Contribution</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...value.breakdown.contributions]
-                      .sort((a, b) => b.points - a.points)
-                      .map((c) => (
-                        <tr key={c.label}>
-                          <td>{c.label}</td>
-                          <td className="num muted">
-                            {((c.weight / totalWeight) * 100).toFixed(1)}%
-                          </td>
-                          <td className="num">{fmtPct(c.normalized)}</td>
-                          <td className="num bold">{(c.points * 1000).toFixed(0)}</td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
 
           {/* ---- This week's matchup ---- */}
           {matchup && (
@@ -318,6 +274,51 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                         </tr>
                       );
                     })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
+          {/* ---- Why this Value Score ---- */}
+          {value && (
+            <section>
+              <h3 className="section-title">
+                Why Value {value.score}
+              </h3>
+              <div className="small muted" style={{ marginBottom: 8 }}>
+                Each term is a percentile within {value.group}, times its weight.
+                {value.breakdown.gamesConfidence < 1 && (
+                  <>
+                    {' '}
+                    Small sample: blended {fmtPct(1 - value.breakdown.gamesConfidence)} toward
+                    neutral.
+                  </>
+                )}
+              </div>
+              <div className="scroll-x">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Signal</th>
+                      <th className="num">Weight</th>
+                      <th className="num">Percentile</th>
+                      <th className="num">Contribution</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...value.breakdown.contributions]
+                      .sort((a, b) => b.points - a.points)
+                      .map((c) => (
+                        <tr key={c.label}>
+                          <td>{c.label}</td>
+                          <td className="num muted">
+                            {((c.weight / totalWeight) * 100).toFixed(1)}%
+                          </td>
+                          <td className="num">{fmtPct(c.normalized)}</td>
+                          <td className="num bold">{(c.points * 1000).toFixed(0)}</td>
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
               </div>

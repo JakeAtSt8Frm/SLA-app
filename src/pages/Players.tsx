@@ -81,7 +81,7 @@ export function PlayersPage() {
     <>
       <div className="page-head">
         <div>
-          <h1 className="page-title">Players</h1>
+          <h1 className="page-title">Available Players</h1>
           <div className="small muted">
             Ranked by Value Score within position group · {data.valueIndex.byPlayer.size} rated
           </div>
@@ -150,24 +150,19 @@ export function PlayersPage() {
         />
       ) : (
         <section className="card" style={{ overflow: 'hidden' }}>
-          <div className="group-head" style={{ position: 'static' }}>
+          <div className="group-head group-head--primary">
             <span>
               {results.length} shown
               {results.length === 150 ? ' (top 150)' : ''}
             </span>
           </div>
           {results.map(({ player, owner }) => (
-            <div key={player.pid} style={{ position: 'relative' }}>
-              <PlayerRow player={player} onSelect={setOpenPid} />
-              {owner && (
-                <span
-                  className="tiny muted"
-                  style={{ position: 'absolute', left: 84, bottom: 4, pointerEvents: 'none' }}
-                >
-                  {owner}
-                </span>
-              )}
-            </div>
+            <PlayerRow
+              key={player.pid}
+              player={player}
+              onSelect={setOpenPid}
+              note={owner}
+            />
           ))}
         </section>
       )}

@@ -27,6 +27,7 @@
 
   /* Brand accent — also categorical slot 1 */
   --accent: #2a78d6;
+  --accent-deep: #1c5cab;
   --accent-ink: #ffffff;
   --accent-wash: rgba(42, 120, 214, 0.1);
 
@@ -81,6 +82,7 @@
     --grid: #2c2c2a;
 
     --accent: #3987e5;
+    --accent-deep: #2a6fc4;
     --accent-ink: #ffffff;
     --accent-wash: rgba(57, 135, 229, 0.16);
 
@@ -118,6 +120,7 @@
   --grid: #2c2c2a;
 
   --accent: #3987e5;
+  --accent-deep: #2a6fc4;
   --accent-ink: #ffffff;
   --accent-wash: rgba(57, 135, 229, 0.16);
 

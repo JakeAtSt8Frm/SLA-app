@@ -19,12 +19,11 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: '/teams', label: 'Teams', short: 'Teams', icon: '▣' },
-  { to: '/matchups', label: 'Matchups', short: 'Match', icon: '⚔' },
   { to: '/optimal', label: 'Optimal Lineup', short: 'Optimal', icon: '✦' },
-  { to: '/analytics', label: 'Analytics', short: 'Stats', icon: '◨' },
   { to: '/history', label: 'History', short: 'History', icon: '◷' },
-  { to: '/trade', label: 'Trade', short: 'Trade', icon: '⇄' },
-  { to: '/players', label: 'Players', short: 'Players', icon: '⌕' },
+  { to: '/players', label: 'Available Players', short: 'Players', icon: '⌕' },
+  { to: '/schedule', label: 'Schedule', short: 'Schedule', icon: '▦' },
+  { to: '/analytics', label: 'Analytics', short: 'Stats', icon: '◨' },
 ];
 
 export function AppShell() {

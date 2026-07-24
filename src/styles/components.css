@@ -1,12 +1,27 @@
 /* ------------------------------------------------------------- topbar --- */
 
+/*
+ * A restrained accent wash across the header: enough colour to give the app an
+ * identity and to separate chrome from content, stopping well short of a
+ * saturated bar. The gradient fades out by the right edge so the controls sit
+ * on plain surface and stay legible.
+ */
 .topbar {
   position: sticky;
   top: 0;
   z-index: 40;
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  background:
+    linear-gradient(
+      100deg,
+      color-mix(in srgb, var(--accent) 14%, transparent) 0%,
+      color-mix(in srgb, var(--accent) 5%, transparent) 42%,
+      transparent 72%
+    ),
+    color-mix(in srgb, var(--surface) 90%, transparent);
   backdrop-filter: saturate(180%) blur(12px);
   border-bottom: 1px solid var(--border);
+  /* A hairline of accent along the bottom ties the header to the active tab. */
+  box-shadow: inset 0 -2px 0 -1px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .topbar__inner {
@@ -26,8 +41,9 @@
   letter-spacing: -0.02em;
   padding: 3px 9px;
   border-radius: var(--radius-sm);
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-deep));
   color: var(--accent-ink);
+  box-shadow: 0 1px 6px color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 .topbar__league {
@@ -138,7 +154,7 @@
 
 .player-row {
   display: grid;
-  grid-template-columns: auto auto 1fr auto auto auto auto;
+  grid-template-columns: auto auto 1fr auto auto auto;
   align-items: center;
   gap: 10px;
   width: 100%;
@@ -152,9 +168,7 @@
   background: var(--surface-sunken);
 }
 
-.player-row__avatar {
-  width: 34px;
-  height: 34px;
+.avatar {
   border-radius: 50%;
   object-fit: cover;
   background: var(--surface-sunken);
@@ -165,6 +179,16 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  gap: 1px;
+}
+
+/* Name and standing share one line: the pills sit immediately after the name
+   and never wrap away from it, so a player reads as a single unit. */
+.player-row__title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
 }
 
 .player-row__name {
@@ -173,11 +197,13 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* Let the name truncate before the pills get squeezed. */
+  flex: 0 1 auto;
+  min-width: 3ch;
 }
 
-.player-row__metrics {
-  display: flex;
-  gap: 4px;
+.player-row__title .chip {
+  flex: 0 0 auto;
 }
 
 .player-row__num {
@@ -194,25 +220,76 @@
   min-width: 52px;
 }
 
-/* Phones: drop the projection column and the metric chips into a second line */
-@media (max-width: 640px) {
+/*
+ * The row adapts to ITS CONTAINER, not the viewport.
+ *
+ * This has to be a container query. A roster row sits inside a half-width grid
+ * column on desktop, so keying off viewport width meant a 730px window rendered
+ * all seven columns into a ~350px pane and crushed the name column to 18px —
+ * the player's name disappeared entirely while the window was "desktop sized".
+ */
+@container player-list (max-width: 520px) {
   .player-row {
     grid-template-columns: auto auto 1fr auto auto;
     gap: 8px;
     padding: 8px 10px;
   }
 
-  .player-row__metrics {
-    grid-column: 3;
-    grid-row: 2;
-  }
-
-  .player-row__id {
-    grid-row: 1;
-  }
-
+  /* Projection hidden at this width; still shown in the detail sheet. */
   .player-row__num:not(.bold) {
-    display: none; /* projection hidden; still in the detail sheet */
+    display: none;
+  }
+}
+
+/* Rank pill label: full word by default, single letter when space is tight.
+   The gap is a margin rather than a literal space so it survives the swap. */
+.chip__long,
+.chip__short {
+  margin-left: 0.35em;
+}
+
+.chip__short {
+  display: none;
+}
+
+/*
+ * Narrower still (phones): the name plus Value plus both rank pills needs about
+ * 500px. Below that the name takes the first line on its own and the pills wrap
+ * beneath it — the name is what you scan for, so it keeps the room.
+ *
+ * The avatar goes too. It is decorative here (the name and position identify
+ * the player), and dropping it returns ~44px to the pills, which is the
+ * difference between them fitting on one line and spilling onto two.
+ */
+@container player-list (max-width: 430px) {
+  .player-row {
+    grid-template-columns: auto 1fr auto auto;
+  }
+
+  .player-row .avatar {
+    display: none;
+  }
+
+  .player-row__title {
+    flex-wrap: wrap;
+    row-gap: 3px;
+  }
+
+  .player-row__name {
+    flex: 1 0 100%;
+    min-width: 0;
+  }
+
+  .chip__long {
+    display: none;
+  }
+
+  .chip__short {
+    display: inline;
+  }
+
+  .player-row__status {
+    min-width: 44px;
   }
 }
 
@@ -235,14 +312,6 @@
 .player-card:hover {
   transform: translateY(-1px);
   box-shadow: var(--shadow);
-}
-
-.player-card__avatar {
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  object-fit: cover;
-  background: var(--surface-sunken);
 }
 
 .player-card__scores {
@@ -440,6 +509,54 @@
 
 /* -------------------------------------------------------------- misc --- */
 
+/* ------------------------------------------------------------ schedule --- */
+
+.game-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--grid);
+}
+
+@media (max-width: 560px) {
+  .game-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.game-side {
+  background: var(--surface);
+  padding-bottom: 6px;
+  min-width: 0;
+}
+
+.game-player {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 12px;
+  text-align: left;
+}
+
+.game-player:hover {
+  background: var(--surface-sunken);
+}
+
+.game-player__name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.game-player__name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .page-head {
   display: flex;
   align-items: flex-start;
@@ -453,6 +570,19 @@
   font-size: 22px;
   font-weight: 800;
   letter-spacing: -0.02em;
+}
+
+/* Page heading gets a short accent rule above it — a quiet bit of colour that
+   marks where a page starts without competing with the data below. */
+.page-head::before {
+  content: '';
+  display: block;
+  width: 38px;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-deep));
+  margin-bottom: 9px;
+  flex-basis: 100%;
 }
 
 .filters {
@@ -484,20 +614,38 @@
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
 }
 
+/*
+ * Section header inside a card.
+ *
+ * Deliberately NOT sticky. It used to stick at `top: var(--nav-height)`, but the
+ * app header is taller than that token and its height varies with wrapping, so a
+ * stuck group header sat on top of the first row of its own group — the QB row
+ * was permanently half-hidden. A static header costs nothing here because the
+ * groups are short.
+ */
 .group-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 12px;
-  background: var(--surface-sunken);
+  padding: 9px 12px;
+  background: linear-gradient(
+    to right,
+    var(--accent-wash),
+    color-mix(in srgb, var(--surface-sunken) 70%, transparent)
+  );
   border-bottom: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-secondary);
-  position: sticky;
-  top: var(--nav-height);
-  z-index: 2;
+}
+
+/* The card's own title bar sits above its groups and reads slightly stronger. */
+.group-head--primary {
+  font-size: 12px;
+  color: var(--text-primary);
+  padding: 11px 12px;
 }

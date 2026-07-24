@@ -86,7 +86,7 @@ export function OptimalPage() {
       </div>
 
       <StatTileRow>
-        <StatTile label="You started" value={fmt1(actualTotal)} />
+        <StatTile label="Actual Score" value={fmt1(actualTotal)} sub="what you started" />
         <StatTile label="Optimal" value={fmt1(optimalTotal)} />
         <StatTile
           label="Left on bench"
@@ -104,7 +104,7 @@ export function OptimalPage() {
 
       <div className="grid-2">
         <section className="card" style={{ overflow: 'hidden' }}>
-          <div className="group-head" style={{ position: 'static' }}>
+          <div className="group-head group-head--primary">
             <span>Optimal lineup</span>
             <span className="mono">{fmt1(optimalTotal)}</span>
           </div>
@@ -205,7 +205,7 @@ export function OptimalPage() {
           )}
 
           <section className="card" style={{ overflow: 'hidden' }}>
-            <div className="group-head" style={{ position: 'static' }}>
+            <div className="group-head group-head--primary">
               <span>League lineup efficiency — week {week}</span>
             </div>
             <div className="scroll-x">

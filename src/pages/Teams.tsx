@@ -101,8 +101,8 @@ export function TeamsPage() {
       </div>
 
       <StatTileRow>
-        <StatTile label="Actual" value={fmt1(actualTotal)} sub="starters, custom scoring" />
-        <StatTile label="Projected" value={fmt1(projectedTotal)} sub="starters" />
+        <StatTile label="Actual Score" value={fmt1(actualTotal)} sub="starters" />
+        <StatTile label="Projected Score" value={fmt1(projectedTotal)} sub="starters" />
         <StatTile
           label="Optimal"
           value={fmt1(optimalTotal)}
@@ -128,11 +128,17 @@ export function TeamsPage() {
 
       <div style={{ height: 16 }} />
 
-      <div className="grid-2">
+      {/*
+        The roster runs full width rather than sharing the row with the heatmap.
+        A player line carries the name plus Value and both rank pills, which
+        needs about 500px before the name starts truncating — in a half-width
+        column it was collapsing to nothing.
+      */}
+      <div className="stack">
         <div className="stack">
           {/* ---- Starters, grouped by slot ---- */}
           <section className="card" style={{ overflow: 'hidden' }}>
-            <div className="group-head" style={{ position: 'static' }}>
+            <div className="group-head group-head--primary">
               <span>Starters ({starters.length})</span>
               <span className="mono">
                 {fmt1(projectedTotal)} proj · {fmt1(actualTotal)} act
@@ -155,7 +161,7 @@ export function TeamsPage() {
           {/* ---- Bench ---- */}
           {bench.length > 0 && (
             <section className="card" style={{ overflow: 'hidden' }}>
-              <div className="group-head" style={{ position: 'static' }}>
+              <div className="group-head group-head--primary">
                 <span>Bench ({bench.length})</span>
                 <span className="mono">{fmt1(sum(bench, (p) => p.act))}</span>
               </div>
@@ -168,7 +174,7 @@ export function TeamsPage() {
           {/* ---- IR / out ---- */}
           {injured.length > 0 && (
             <section className="card" style={{ overflow: 'hidden' }}>
-              <div className="group-head" style={{ position: 'static' }}>
+              <div className="group-head group-head--primary">
                 <span>Injured / Out ({injured.length})</span>
               </div>
               {injured.map((p) => (
@@ -178,30 +184,30 @@ export function TeamsPage() {
           )}
         </div>
 
-        {/* ---- Heatmap ---- */}
-        <div className="stack">
-          <div className="filters" style={{ marginBottom: 0 }}>
-            <div className="segmented" role="group" aria-label="Heatmap scope">
-              <button aria-pressed={scope === 'starters'} onClick={() => setScope('starters')}>
-                Starters
-              </button>
-              <button aria-pressed={scope === 'all'} onClick={() => setScope('all')}>
-                Full roster
-              </button>
-            </div>
-            <div className="segmented" role="group" aria-label="Heatmap metric">
-              <button aria-pressed={metric === 'actual'} onClick={() => setMetric('actual')}>
-                Actual
-              </button>
-              <button aria-pressed={metric === 'projected'} onClick={() => setMetric('projected')}>
-                Projected
-              </button>
-            </div>
+        {/* ---- Heatmap + status, below the roster ---- */}
+        <div className="filters" style={{ marginTop: 6, marginBottom: 0 }}>
+          <div className="segmented" role="group" aria-label="Heatmap scope">
+            <button aria-pressed={scope === 'starters'} onClick={() => setScope('starters')}>
+              Starters
+            </button>
+            <button aria-pressed={scope === 'all'} onClick={() => setScope('all')}>
+              Full roster
+            </button>
           </div>
+          <div className="segmented" role="group" aria-label="Heatmap metric">
+            <button aria-pressed={metric === 'actual'} onClick={() => setMetric('actual')}>
+              Actual
+            </button>
+            <button aria-pressed={metric === 'projected'} onClick={() => setMetric('projected')}>
+              Projected
+            </button>
+          </div>
+        </div>
 
+        <div className="grid-2">
           <Heatmap
             title={`${metric === 'actual' ? 'Actual' : 'Projected'} points by position — week ${week}`}
-            subtitle={`${scope === 'starters' ? 'Starting lineups' : 'Full rosters'}, custom scoring. Grouped by a player's real position, not the slot they filled, so an LB started at DL counts under LB. Colour compares teams within each column.`}
+            subtitle={`${scope === 'starters' ? 'Starting lineups' : 'Full rosters'}. Grouped by a player's real position, not the slot they filled, so an LB started at DL counts under LB. Colour compares teams within each column.`}
             rows={heatmapRows}
             selectedRosterId={rosterId}
             onSelectTeam={setSelectedRosterId}
