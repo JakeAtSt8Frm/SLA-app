@@ -539,6 +539,7 @@
 
 .heatmap {
   width: 100%;
+  table-layout: fixed;
   border-collapse: separate;
   border-spacing: 2px; /* the 2px surface gap between fills */
   font-size: 12px;
@@ -556,6 +557,10 @@
   padding: 4px 6px;
   text-align: center;
   white-space: nowrap;
+}
+
+.heatmap__team-col {
+  width: 96px;
 }
 
 .heatmap__team-head,
@@ -580,12 +585,26 @@
 }
 
 .heatmap td {
-  padding: 7px 8px;
-  text-align: right;
+  padding: 7px 3px;
+  text-align: center;
+  font-size: 11px;
   border-radius: 4px;
-  min-width: 52px;
+  min-width: 0;
   background: var(--surface-sunken);
   color: var(--text-secondary);
+}
+
+/* Eight positions plus Total fit without a desktop scrollbar. On a phone the
+   cells retain a readable minimum and the existing touch scroller takes over. */
+@media (max-width: 600px) {
+  .heatmap {
+    table-layout: auto;
+    min-width: 610px;
+  }
+
+  .heatmap td {
+    min-width: 48px;
+  }
 }
 
 .heatmap tr.is-selected .heatmap__team-btn {
@@ -719,9 +738,9 @@
   align-items: start;
 }
 
-@media (min-width: 1080px) {
+@media (min-width: 1160px) {
   .split-roster {
-    grid-template-columns: minmax(560px, 1.55fr) minmax(300px, 1fr);
+    grid-template-columns: minmax(540px, 1.2fr) minmax(500px, 1fr);
   }
 
   /* The heatmap column tracks the page as you scroll the roster. */
@@ -804,6 +823,20 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.power-controls {
+  padding-bottom: 0;
+}
+
+.power-controls .segmented {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.power-controls .segmented button {
+  flex: 0 0 auto;
 }
 
 .power-row {

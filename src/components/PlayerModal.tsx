@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { LazyWeeklyScoreChart } from './LazyChart';
 import { useLeagueData } from '../data/LeagueProvider';
 import { playerHeadshot, teamLogo } from '../lib/sleeper';
-import { fmt1, fmtPct, MatchupChip, StatusBadge, ValueChip } from './primitives';
+import { fmt1, fmtPct, StatusBadge, ValueChip } from './primitives';
 import { enrichPlayer } from '../data/selectors';
 import { VALUE_WEIGHTS } from '../lib/value';
 
@@ -111,7 +111,6 @@ export function PlayerModal({ pid, week, onClose }: Props) {
             </div>
             <div className="row wrap" style={{ gap: 6, marginTop: 6 }}>
               <ValueChip score={p.valueScore} />
-              <MatchupChip score={p.matchupScore} />
               {p.ppgRank && (
                 <span className="chip chip-outline">
                   {p.group} #{p.ppgRank.rank} PPG

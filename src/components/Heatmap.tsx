@@ -65,8 +65,12 @@ export function Heatmap({ title, rows, selectedRosterId, onSelectTeam }: Props) 
         </button>
       </figcaption>
 
-      <div className="scroll-x">
+      <div className="scroll-x heatmap-scroll">
         <table className="heatmap" aria-label={title}>
+          <colgroup>
+            <col className="heatmap__team-col" />
+            <col span={activeGroups.length + 1} />
+          </colgroup>
           <thead>
             <tr>
               <th scope="col" className="heatmap__team-head">

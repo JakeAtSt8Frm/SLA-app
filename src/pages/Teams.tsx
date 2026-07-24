@@ -164,11 +164,11 @@ export function TeamsPage() {
             </section>
           )}
 
-          {/* ---- IR / out ---- */}
+          {/* ---- Injured reserve ---- */}
           {injured.length > 0 && (
             <section className="card" style={{ overflow: 'hidden' }}>
               <div className="group-head group-head--primary">
-                <span>Injured / Out ({injured.length})</span>
+                <span>IR ({injured.length})</span>
               </div>
               {injured.map((p) => (
                 <PlayerRow key={p.pid} player={p} onSelect={setOpenPid} />

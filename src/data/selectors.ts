@@ -165,9 +165,14 @@ export function buildRosterWeek(
   for (const pid of clean(team.roster.taxi)) addBench(pid, 'TX');
   for (const pid of clean(team.roster.reserve)) addBench(pid, 'IR');
 
-  const benchAll = [...benchSlots].map(([pid, slot]) => enrichPlayer(data, pid, week, slot, false));
-  const bench = benchAll.filter((p) => !p.isOut);
-  const injured = benchAll.filter((p) => p.isOut);
+  const benchAll = [...benchSlots].map(([pid, slot]) =>
+    enrichPlayer(data, pid, week, slot, false),
+  );
+  // Reserve-list membership, not today's injury designation, determines the
+  // section. An OUT player can still occupy BN, while a healthy player can
+  // remain in Sleeper's reserve array until the manager activates him.
+  const injured = benchAll.filter((p) => p.slot.toUpperCase() === 'IR');
+  const bench = benchAll.filter((p) => p.slot.toUpperCase() !== 'IR');
 
   const projectedTotal = round2(starters.reduce((s, p) => s + p.proj, 0));
   const actualTotal = round2(starters.reduce((s, p) => s + p.act, 0));
@@ -185,7 +190,7 @@ export function buildRosterWeek(
     week,
     starters,
     bench: bench.sort(sortByImpact),
-    injured,
+    injured: injured.sort(sortByImpact),
     all: [...starters, ...benchAll],
     projectedTotal,
     actualTotal,

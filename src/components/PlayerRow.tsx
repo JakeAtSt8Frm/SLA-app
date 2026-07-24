@@ -31,6 +31,13 @@ interface Props {
   note?: string | null;
 }
 
+const RESERVE_SLOTS = new Set(['BN', 'IR', 'TX', 'TAXI', 'RESERVE']);
+
+/** Reserve rows show football position; lineup rows retain meaningful flex slots. */
+function positionBadgeSlot(player: EnrichedPlayer): string | undefined {
+  return RESERVE_SLOTS.has(player.slot.toUpperCase()) ? undefined : player.slot;
+}
+
 /** Headshot that falls back to the team logo, then hides itself. */
 function Avatar({ pid, team, size }: { pid: string; team: string; size: number }) {
   return (
@@ -64,7 +71,7 @@ export function PlayerRow({ player: p, onSelect, showProjection = true, note }: 
         p.hasPlayed ? `scored ${fmt1(p.act)}` : `projected ${fmt1(p.proj)}`
       }`}
     >
-      <PosBadge group={p.group} slot={p.slot} />
+      <PosBadge group={p.group} slot={positionBadgeSlot(p)} />
 
       <Avatar pid={p.pid} team={p.team} size={34} />
 
@@ -134,7 +141,7 @@ export function PlayerCard({ player: p, onSelect }: Props) {
             {p.opponent ? ` vs ${p.opponent}` : ''}
           </div>
         </div>
-        <PosBadge group={p.group} slot={p.slot} />
+        <PosBadge group={p.group} slot={positionBadgeSlot(p)} />
       </div>
 
       <div className="player-card__scores">
