@@ -220,8 +220,12 @@ export function AnalyticsPage() {
     const records = new Map(
       teams.map((team) => [
         team.rosterId,
-        { wins: 0, losses: 0, ties: 0 },
+        { wins: 0, losses: 0, ties: 0, pointsFor: 0 },
       ]),
+    );
+    const regularSeasonWeeks = Math.max(
+      0,
+      ...data.teams.map((team) => team.wins + team.losses + team.ties),
     );
 
     const points = Array.from({ length: data.currentWeek }, (_, index) => {
@@ -229,11 +233,14 @@ export function AnalyticsPage() {
       const matchups = data.weeks.get(week)?.matchups ?? [];
       const games = new Map<number, typeof matchups>();
 
-      for (const matchup of matchups) {
-        if (matchup.matchup_id === null) continue;
-        const game = games.get(matchup.matchup_id) ?? [];
-        game.push(matchup);
-        games.set(matchup.matchup_id, game);
+      if (week <= regularSeasonWeeks) {
+        for (const matchup of matchups) {
+          records.get(matchup.roster_id)!.pointsFor += matchup.points;
+          if (matchup.matchup_id === null) continue;
+          const game = games.get(matchup.matchup_id) ?? [];
+          game.push(matchup);
+          games.set(matchup.matchup_id, game);
+        }
       }
 
       for (const game of games.values()) {
@@ -263,9 +270,13 @@ export function AnalyticsPage() {
         const standingWins = record.wins + record.ties * 0.5;
         point[team.dataKey] =
           1 +
-          [...records.values()].filter(
-            (other) => other.wins + other.ties * 0.5 > standingWins,
-          ).length;
+          [...records.values()].filter((other) => {
+            const otherWins = other.wins + other.ties * 0.5;
+            return (
+              otherWins > standingWins ||
+              (otherWins === standingWins && other.pointsFor > record.pointsFor)
+            );
+          }).length;
       }
       return point;
     });
@@ -485,7 +496,7 @@ export function AnalyticsPage() {
         <section className="card" style={{ overflow: 'hidden' }}>
           <div className="group-head group-head--primary">
             <span>Weekly W/L rank</span>
-            <span className="mono">Cumulative · 1st is best</span>
+            <span className="mono">Record · points tiebreak</span>
           </div>
           <div className="card-pad">
             <LazyWeeklyTeamRankChart
