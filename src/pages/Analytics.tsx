@@ -18,7 +18,7 @@ import {
 } from '../components/primitives';
 import { useTheme } from '../components/ThemeProvider';
 import { teamColor } from '../lib/colors';
-import { mean, percentileRanks, quantile, round, stdev } from '../lib/stats';
+import { mean, quantile, round, stdev } from '../lib/stats';
 import { POSITION_GROUPS, type PositionGroup } from '../lib/types';
 
 interface AllPlayRecord {
@@ -54,15 +54,10 @@ export function AnalyticsPage() {
       for (let week = 1; week <= data.currentWeek; week++) {
         const rosterWeek = buildRosterWeek(data, team.rosterId, week);
         if (!rosterWeek || rosterWeek.starters.length === 0) continue;
-        const byGroup = emptyPositionTotals();
-        for (const player of rosterWeek.starters) {
-          if (player.group) byGroup[player.group] += player.act;
-        }
         weekly.push({
           week,
           actual: rosterWeek.actualTotal,
           optimal: rosterWeek.optimalTotal,
-          byGroup,
         });
       }
 
@@ -70,14 +65,6 @@ export function AnalyticsPage() {
       const actual = scores.reduce((sum, score) => sum + score, 0);
       const optimal = weekly.reduce((sum, row) => sum + row.optimal, 0);
       const recentScores = scores.slice(-4);
-      const positionAverages = emptyPositionTotals();
-      const positionRecentAverages = emptyPositionTotals();
-      for (const group of POSITION_GROUPS) {
-        positionAverages[group] = round(mean(weekly.map((row) => row.byGroup[group])));
-        positionRecentAverages[group] = round(
-          mean(weekly.slice(-4).map((row) => row.byGroup[group])),
-        );
-      }
 
       return {
         ...team,
@@ -90,8 +77,6 @@ export function AnalyticsPage() {
         best: scores.length ? round(Math.max(...scores)) : 0,
         volatility: round(stdev(scores)),
         efficiency: optimal > 0 ? actual / optimal : 0,
-        positionAverages,
-        positionRecentAverages,
       };
     });
 
@@ -158,50 +143,66 @@ export function AnalyticsPage() {
   }, [data]);
 
   /**
-   * Overall power uses team results and management. Positional power isolates
-   * starter production at the selected position: 65% season, 35% last four.
+   * Whole-roster power: the average player Value Score across a team's entire
+   * roster — starters, bench, taxi and reserve — rather than the output of
+   * whoever happens to be starting. Value Score is a percentile within a
+   * player's own position group, so averaging across a roster is a fair
+   * apples-to-apples read on total talent. Positional scope narrows the average
+   * to the players a team rosters at the selected position.
+   *
+   * The bar is scaled so the strongest roster reads 100 and the rest sit in
+   * proportion to it, which shows the true size of the talent gaps.
    */
-  const power = useMemo(() => {
-    const rank = (pick: (team: (typeof standings)[number]) => number) =>
-      percentileRanks(
-        standings.map((team) => ({ id: String(team.rosterId), value: pick(team) })),
-      );
+  const rosterValues = useMemo(() => {
+    const map = new Map<number, { overall: number; byGroup: Record<PositionGroup, number> }>();
 
-    if (powerScope !== 'ALL') {
-      const group = powerScope;
-      const season = rank((team) => team.positionAverages[group]);
-      const form = rank((team) => team.positionRecentAverages[group]);
+    for (const team of data.teams) {
+      const ids = new Set<string>();
+      for (const pid of team.roster.players ?? []) if (pid) ids.add(String(pid));
+      for (const pid of team.roster.taxi ?? []) if (pid) ids.add(String(pid));
+      for (const pid of team.roster.reserve ?? []) if (pid) ids.add(String(pid));
 
-      return standings
-        .map((team) => {
-          const id = String(team.rosterId);
-          const powerIndex =
-            ((season.get(id) ?? 0) * 0.65 + (form.get(id) ?? 0) * 0.35) * 100;
-          return {
-            ...team,
-            powerIndex: round(powerIndex, 1),
-            powerAverage: team.positionAverages[group],
-          };
-        })
-        .sort((a, b) => b.powerIndex - a.powerIndex);
+      let sum = 0;
+      let count = 0;
+      const groupSum = emptyPositionTotals();
+      const groupCount = emptyPositionTotals();
+      for (const pid of ids) {
+        const value = data.valueIndex.byPlayer.get(pid);
+        if (!value) continue;
+        sum += value.score;
+        count += 1;
+        groupSum[value.group] += value.score;
+        groupCount[value.group] += 1;
+      }
+
+      const byGroup = emptyPositionTotals();
+      for (const group of POSITION_GROUPS) {
+        byGroup[group] = groupCount[group] > 0 ? groupSum[group] / groupCount[group] : 0;
+      }
+      map.set(team.rosterId, { overall: count > 0 ? sum / count : 0, byGroup });
     }
 
-    const scoring = rank((team) => team.avg);
-    const form = rank((team) => team.recentAvg);
-    const management = rank((team) => team.efficiency);
-    return standings
-      .map((team) => {
-        const id = String(team.rosterId);
-        const powerIndex =
-          ((scoring.get(id) ?? 0) * 0.45 +
-            (form.get(id) ?? 0) * 0.25 +
-            team.allPlayPct * 0.2 +
-            (management.get(id) ?? 0) * 0.1) *
-          100;
-        return { ...team, powerIndex: round(powerIndex, 1), powerAverage: team.avg };
-      })
+    return map;
+  }, [data]);
+
+  const power = useMemo(() => {
+    const metric = (rosterId: number) => {
+      const rv = rosterValues.get(rosterId);
+      if (!rv) return 0;
+      return powerScope === 'ALL' ? rv.overall : rv.byGroup[powerScope];
+    };
+
+    const rows = standings.map((team) => ({ team, value: metric(team.rosterId) }));
+    const max = Math.max(1, ...rows.map((row) => row.value));
+
+    return rows
+      .map(({ team, value }) => ({
+        ...team,
+        powerIndex: round((value / max) * 100, 1),
+        powerAverage: round(value),
+      }))
       .sort((a, b) => b.powerIndex - a.powerIndex);
-  }, [powerScope, standings]);
+  }, [powerScope, standings, rosterValues]);
 
   const defenses = useMemo(() => {
     const entries = data.matchupIndex.byGroup.get(muGroup);
@@ -343,10 +344,15 @@ export function AnalyticsPage() {
           </div>
           <p id="power-formula" className="sr-only">
             {powerScope === 'ALL'
-              ? 'Overall power weights season scoring 45 percent, last-four form 25 percent, all-play performance 20 percent and lineup efficiency 10 percent.'
-              : `${powerScope} power weights season positional scoring 65 percent and last-four positional scoring 35 percent.`}
+              ? "Overall power is the average player Value Score across a team's entire roster, including bench, taxi and reserve. The bar is scaled so the strongest roster reads 100."
+              : `${powerScope} power is the average player Value Score of the ${powerScope}s a team rosters. The bar is scaled so the strongest reads 100.`}
           </p>
           <div className="card-pad power-controls">
+            <p className="small muted" style={{ margin: '0 0 10px' }}>
+              {powerScope === 'ALL'
+                ? 'Average player value across the whole roster — depth included, not just starters.'
+                : `Average value of every ${powerScope} on the roster.`}
+            </p>
             <div className="segmented" role="group" aria-label="Power ranking scope">
               <button
                 aria-pressed={powerScope === 'ALL'}
@@ -398,7 +404,7 @@ export function AnalyticsPage() {
                   </span>
                   <span
                     className="power-value mono bold"
-                    title={`${fmt1(team.powerAverage)} points per week`}
+                    title={`${Math.round(team.powerAverage)} average player value`}
                   >
                     {team.powerIndex.toFixed(1)}
                   </span>

@@ -9,10 +9,12 @@
 
 import { useMemo, useState } from 'react';
 import { useLeague, useLeagueData } from '../data/LeagueProvider';
-import { buildHeatmap, buildRosterWeek } from '../data/selectors';
+import { buildHeatmap, buildRosterWeek, buildStarterStrength } from '../data/selectors';
 import { PlayerRow } from '../components/PlayerRow';
 import { PlayerModal } from '../components/PlayerModal';
 import { Heatmap } from '../components/Heatmap';
+import { useTheme } from '../components/ThemeProvider';
+import { rankFill } from '../lib/colors';
 import {
   EmptyState,
   PlacementBadge,
@@ -21,7 +23,8 @@ import {
   fmt1,
   fmtPct,
 } from '../components/primitives';
-import type { EnrichedPlayer } from '../lib/types';
+import { POSITION_GROUPS } from '../lib/types';
+import type { EnrichedPlayer, PositionGroup } from '../lib/types';
 import type { HeatmapMetric, HeatmapScope } from '../data/selectors';
 
 /** Display order and labels for starter slot groups. */
@@ -45,6 +48,7 @@ const SLOT_GROUPS: Array<{ key: string; label: string; slots: string[] }> = [
 export function TeamsPage() {
   const data = useLeagueData();
   const { week, selectedRosterId, setSelectedRosterId } = useLeague();
+  const { mode } = useTheme();
   const [openPid, setOpenPid] = useState<string | null>(null);
   const [scope, setScope] = useState<HeatmapScope>('starters');
   const [metric, setMetric] = useState<HeatmapMetric>('actual');
@@ -55,6 +59,22 @@ export function TeamsPage() {
     () => (rosterId === null ? null : buildRosterWeek(data, rosterId, week)),
     [data, rosterId, week],
   );
+
+  // Where this team's *starting lineup* ranks league-wide, overall and by
+  // position — the starter-based counterpart to Analytics' whole-roster power.
+  const starterStrength = useMemo(() => buildStarterStrength(data), [data]);
+  const starterRank = useMemo(() => {
+    if (rosterId === null) return null;
+    const outOf = starterStrength.length;
+    const rankBy = (pick: (t: (typeof starterStrength)[number]) => number) => {
+      const sorted = [...starterStrength].sort((a, b) => pick(b) - pick(a));
+      return sorted.findIndex((t) => t.rosterId === rosterId) + 1;
+    };
+    const byGroup = Object.fromEntries(
+      POSITION_GROUPS.map((group) => [group, rankBy((t) => t.positionAverages[group])]),
+    ) as Record<PositionGroup, number>;
+    return { overall: rankBy((t) => t.avg), outOf, byGroup };
+  }, [starterStrength, rosterId]);
 
   const heatmapRows = useMemo(
     () => buildHeatmap(data, week, scope, metric),
@@ -209,6 +229,13 @@ export function TeamsPage() {
             <div className="section-title">Status breakdown</div>
             <StatusSummary players={starters} />
           </div>
+
+          {starterRank && (
+            <div className="card card-pad">
+              <div className="section-title">Starter power rank</div>
+              <StarterPowerRank rank={starterRank} mode={mode} />
+            </div>
+          )}
         </div>
       </div>
 
@@ -219,6 +246,58 @@ export function TeamsPage() {
 
 function sum<T>(items: T[], pick: (item: T) => number): number {
   return Math.round(items.reduce((s, i) => s + pick(i), 0) * 100) / 100;
+}
+
+/** 1 -> "1st", 2 -> "2nd", ... */
+function ordinal(n: number): string {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
+  const suffix = ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th';
+  return `${n}${suffix}`;
+}
+
+/**
+ * League rank of a team's starting lineup — overall and by position — on the
+ * app's red→yellow→green scale, where first is green and last is red. The
+ * numeral inside each chip is the non-colour channel, so the ranking is legible
+ * without relying on hue.
+ */
+function StarterPowerRank({
+  rank,
+  mode,
+}: {
+  rank: { overall: number; outOf: number; byGroup: Record<PositionGroup, number> };
+  mode: 'light' | 'dark';
+}) {
+  const chipStyle = (r: number) => {
+    const { background, ink } = rankFill(r, rank.outOf, mode);
+    return { background, color: ink };
+  };
+
+  return (
+    <div className="stack" style={{ gap: 12 }}>
+      <div className="row" style={{ alignItems: 'center', gap: 10 }}>
+        <span className="small" style={{ flex: 1 }}>
+          Overall
+        </span>
+        <span className="rank-chip mono bold" style={chipStyle(rank.overall)}>
+          {ordinal(rank.overall)}
+          <span className="rank-chip__of"> of {rank.outOf}</span>
+        </span>
+      </div>
+
+      <div className="rank-grid">
+        {POSITION_GROUPS.map((group) => (
+          <div key={group} className="rank-grid__cell">
+            <span className="small muted">{group}</span>
+            <span className="rank-chip mono bold" style={chipStyle(rank.byGroup[group])}>
+              {ordinal(rank.byGroup[group])}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /** Counts of each boom/bust classification across a lineup. */

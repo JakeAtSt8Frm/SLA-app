@@ -98,7 +98,7 @@ export function AppShell() {
             )}
 
             <button
-              className="btn btn-ghost btn-sm"
+              className="btn btn-ghost btn-sm topbar__icon"
               onClick={toggle}
               aria-label={`Switch to ${mode === 'dark' ? 'light' : 'dark'} theme`}
               title={`Switch to ${mode === 'dark' ? 'light' : 'dark'} theme`}
@@ -107,7 +107,7 @@ export function AppShell() {
             </button>
 
             <button
-              className="btn btn-ghost btn-sm"
+              className="btn btn-ghost btn-sm topbar__icon"
               onClick={refresh}
               aria-label="Refresh data"
               title="Clear cache and reload"
@@ -117,7 +117,7 @@ export function AppShell() {
 
             <div style={{ position: 'relative' }}>
               <button
-                className={`btn btn-ghost btn-sm${rostersOverridden ? ' is-active' : ''}`}
+                className={`btn btn-ghost btn-sm topbar__icon${rostersOverridden ? ' is-active' : ''}`}
                 onClick={() => setSettingsOpen((v) => !v)}
                 aria-label="Settings"
                 aria-expanded={settingsOpen}
