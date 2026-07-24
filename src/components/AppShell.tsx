@@ -57,12 +57,6 @@ export function AppShell() {
             <span className="brand">SLA</span>
             <span className="topbar__league">
               {data ? data.league.name : 'Loading…'}
-              {data && (
-                <span className="tiny muted" style={{ display: 'block', lineHeight: 1.2 }}>
-                  {data.league.total_rosters} teams · {data.starterSlots.length} starters ·{' '}
-                  {data.scoringModel.keys.length} scoring keys
-                </span>
-              )}
             </span>
           </div>
 

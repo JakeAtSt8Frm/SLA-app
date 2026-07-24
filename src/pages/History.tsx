@@ -78,17 +78,10 @@ export function HistoryPage() {
     return <EmptyState title="No history yet" hint="Play a week first." />;
   }
 
-  const team = data.teamsById.get(rosterId)!;
-
   return (
     <>
       <div className="page-head">
-        <div>
-          <h1 className="page-title">History</h1>
-          <div className="small muted">
-            {team.name} · {season.length} weeks · custom scoring throughout
-          </div>
-        </div>
+        <h1 className="page-title">History</h1>
       </div>
 
       <div className="filters">
@@ -107,12 +100,12 @@ export function HistoryPage() {
       </div>
 
       <StatTileRow>
-        <StatTile label="Season total" value={fmt1(totals.actual)} sub={`${fmt1(totals.avg)} / week`} />
+        <StatTile label="Season total" value={fmt1(totals.actual)} />
+        <StatTile label="Weekly average" value={fmt1(totals.avg)} />
         <StatTile label="Optimal total" value={fmt1(totals.optimal)} />
         <StatTile
           label="Left on bench"
           value={fmt1(totals.left)}
-          sub="across the season"
           tone={totals.left > 200 ? 'var(--danger-text)' : undefined}
         />
         <StatTile
@@ -137,9 +130,6 @@ export function HistoryPage() {
         <section className="card card-pad">
           <div className="section-title">Points left on the bench, by week</div>
           <LazyWeeklyBarChart data={season} dataKey="left" label="Left on bench" height={200} />
-          <div className="tiny muted" style={{ marginTop: 6 }}>
-            Difference between the optimal lineup and what was actually started.
-          </div>
         </section>
 
         {/* ---- Week detail ---- */}
@@ -185,7 +175,6 @@ export function HistoryPage() {
 
         <Heatmap
           title={`${metric === 'actual' ? 'Actual' : 'Projected'} points by position — week ${historyWeek}`}
-          subtitle="Starting lineups. Colour compares teams within each column."
           rows={heatmapRows}
           selectedRosterId={rosterId}
           onSelectTeam={setSelectedRosterId}

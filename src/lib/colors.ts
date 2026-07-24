@@ -150,6 +150,24 @@ export const SERIES = {
 } as const;
 
 /**
+ * Stable categorical colours for fantasy teams.
+ *
+ * The same roster id keeps the same colour across standings and charts, while
+ * separate light/dark palettes keep team names readable against either surface.
+ * Colour is never the only identifier: every mark is paired with the team name.
+ */
+export const TEAM_COLORS = {
+  light: ['#1769aa', '#9c4a00', '#08765b', '#6f52b5', '#a23b72', '#006d77'],
+  dark: ['#74b7ff', '#ffad73', '#65d7ad', '#c3a8ff', '#ff92c7', '#67d4df'],
+} as const;
+
+export function teamColor(rosterId: number, mode: Mode): string {
+  const palette = TEAM_COLORS[mode];
+  const index = Math.abs(Math.trunc(rosterId) - 1) % palette.length;
+  return palette[index];
+}
+
+/**
  * The red → yellow → green scale, per mode.
  *
  * `mid` is a true yellow rather than a neutral, matching the original app: the

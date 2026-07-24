@@ -78,20 +78,12 @@ export function TeamsPage() {
   const { team, starters, bench, injured, projectedTotal, actualTotal, optimalTotal, efficiency } =
     rosterWeek;
 
-  const pointsLeftOnBench = Math.max(0, optimalTotal - actualTotal);
-
   return (
     <>
       <div className="page-head">
-        <div>
-          <h1 className="page-title">
-            {team.name} <PlacementBadge placement={team.placement} />
-          </h1>
-          <div className="small muted">
-            {team.ownerName} · {team.wins}-{team.losses}
-            {team.ties ? `-${team.ties}` : ''} · Week {week}
-          </div>
-        </div>
+        <h1 className="page-title">
+          {team.name} <PlacementBadge placement={team.placement} />
+        </h1>
       </div>
 
       {/* Team switcher */}
@@ -111,21 +103,12 @@ export function TeamsPage() {
       </div>
 
       <StatTileRow>
-        <StatTile label="Actual Score" value={fmt1(actualTotal)} sub="starters" />
-        <StatTile label="Projected Score" value={fmt1(projectedTotal)} sub="starters" />
-        <StatTile
-          label="Optimal"
-          value={fmt1(optimalTotal)}
-          sub="best possible lineup"
-        />
+        <StatTile label="Actual Score" value={fmt1(actualTotal)} />
+        <StatTile label="Projected Score" value={fmt1(projectedTotal)} />
+        <StatTile label="Optimal" value={fmt1(optimalTotal)} />
         <StatTile
           label="Efficiency"
           value={fmtPct(efficiency, 1)}
-          sub={
-            pointsLeftOnBench > 0.05
-              ? `${fmt1(pointsLeftOnBench)} left on bench`
-              : 'perfect lineup'
-          }
           tone={
             efficiency >= 0.95
               ? 'var(--success-text)'
@@ -217,7 +200,6 @@ export function TeamsPage() {
 
           <Heatmap
             title={`${metric === 'actual' ? 'Actual' : 'Projected'} points by position — week ${week}`}
-            subtitle={`${scope === 'starters' ? 'Starting lineups' : 'Full rosters'}. Grouped by a player's real position, not the slot they filled, so an LB started at DL counts under LB. Colour compares teams within each column.`}
             rows={heatmapRows}
             selectedRosterId={rosterId}
             onSelectTeam={setSelectedRosterId}

@@ -52,7 +52,7 @@ export function OptimalPage() {
 
   if (!rosterWeek) return <EmptyState title="No team selected" />;
 
-  const { team, optimalLineup, actualTotal, optimalTotal, efficiency, starters } = rosterWeek;
+  const { optimalLineup, actualTotal, optimalTotal, efficiency, starters } = rosterWeek;
   const startedIds = new Set(starters.map((p) => p.pid));
 
   // Which optimal picks were actually benched — the actionable part.
@@ -63,12 +63,7 @@ export function OptimalPage() {
   return (
     <>
       <div className="page-head">
-        <div>
-          <h1 className="page-title">Optimal Lineup</h1>
-          <div className="small muted">
-            {team.name} · Week {week} · best legal lineup under this league's scoring
-          </div>
-        </div>
+        <h1 className="page-title">Optimal Lineup</h1>
       </div>
 
       <div className="filters">
@@ -87,7 +82,7 @@ export function OptimalPage() {
       </div>
 
       <StatTileRow>
-        <StatTile label="Actual Score" value={fmt1(actualTotal)} sub="what you started" />
+        <StatTile label="Actual Score" value={fmt1(actualTotal)} />
         <StatTile label="Optimal" value={fmt1(optimalTotal)} />
         <StatTile
           label="Left on bench"
@@ -180,9 +175,6 @@ export function OptimalPage() {
           {missed.length > 0 && (
             <section className="card card-pad">
               <div className="section-title">Misses this week</div>
-              <div className="small muted" style={{ marginBottom: 8 }}>
-                These belonged in the lineup but sat on the bench.
-              </div>
               <div className="stack" style={{ gap: 6 }}>
                 {missed.map((a) => {
                   const player = a.pid ? data.playersById.get(a.pid) : undefined;
@@ -246,7 +238,6 @@ export function OptimalPage() {
 
           <Heatmap
             title={`Projected points by position — week ${week}`}
-            subtitle="Where each team's projected strength sits, relative to the league."
             rows={heatmapRows}
             selectedRosterId={rosterId}
             onSelectTeam={setSelectedRosterId}

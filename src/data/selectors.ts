@@ -31,6 +31,13 @@ export interface RosterWeek {
 }
 
 /**
+ * LeagueData is immutable after loading, so a team/week result can be safely
+ * reused across Teams, Optimal, History, heatmaps and Analytics. In particular
+ * this avoids rerunning the optimal-lineup matching algorithm on every visit.
+ */
+const rosterWeekCache = new WeakMap<LeagueData, Map<string, RosterWeek | null>>();
+
+/**
  * Enriches one player for one week with everything the UI needs.
  */
 export function enrichPlayer(
@@ -96,8 +103,20 @@ export function buildRosterWeek(
   rosterId: number,
   week: number,
 ): RosterWeek | null {
+  let dataCache = rosterWeekCache.get(data);
+  if (!dataCache) {
+    dataCache = new Map();
+    rosterWeekCache.set(data, dataCache);
+  }
+
+  const cacheKey = `${rosterId}:${week}`;
+  if (dataCache.has(cacheKey)) return dataCache.get(cacheKey) ?? null;
+
   const team = data.teamsById.get(rosterId);
-  if (!team) return null;
+  if (!team) {
+    dataCache.set(cacheKey, null);
+    return null;
+  }
 
   const weekData = data.weeks.get(week);
   const matchup = weekData?.matchups.find((m) => m.roster_id === rosterId);
@@ -160,7 +179,7 @@ export function buildRosterWeek(
   }));
   const optimalLineup = computeOptimalLineup(slots, pool);
 
-  return {
+  const result: RosterWeek = {
     team,
     week,
     starters,
@@ -173,6 +192,9 @@ export function buildRosterWeek(
     efficiency: lineupEfficiency(actualTotal, optimalLineup.total),
     optimalLineup,
   };
+
+  dataCache.set(cacheKey, result);
+  return result;
 }
 
 function round2(n: number): number {

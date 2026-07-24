@@ -19,14 +19,13 @@ import type { PositionGroup } from '../lib/types';
 
 interface Props {
   title: string;
-  subtitle?: string;
   rows: HeatmapRow[];
   /** Highlights this team's row. */
   selectedRosterId?: number | null;
   onSelectTeam?: (rosterId: number) => void;
 }
 
-export function Heatmap({ title, subtitle, rows, selectedRosterId, onSelectTeam }: Props) {
+export function Heatmap({ title, rows, selectedRosterId, onSelectTeam }: Props) {
   const { mode } = useTheme();
   const [showTable, setShowTable] = useState(false);
 
@@ -54,11 +53,8 @@ export function Heatmap({ title, subtitle, rows, selectedRosterId, onSelectTeam 
   return (
     <figure className="card" style={{ margin: 0, overflow: 'hidden' }}>
       <figcaption className="row-between" style={{ padding: '12px 14px 8px' }}>
-        <div style={{ minWidth: 0 }}>
-          <div className="bold" style={{ fontSize: 14 }}>
-            {title}
-          </div>
-          {subtitle && <div className="tiny muted">{subtitle}</div>}
+        <div className="bold" style={{ minWidth: 0, fontSize: 14 }}>
+          {title}
         </div>
         <button
           className="btn btn-ghost btn-sm"

@@ -65,7 +65,7 @@ rank base, recent trend, ceiling and floor rates, consistency and top-10 rate.
 | **History** | Season trend: Projected vs Actual vs Optimal, week by week |
 | **Available Players** | Searchable browser over free agents and rostered players |
 | **Schedule** | The NFL week with rostered players, owners and custom scores overlaid |
-| **Analytics** | Standings, power ranking, defensive generosity research |
+| **Analytics** | Standings, all-play record, schedule luck, power index, volatility and defensive generosity |
 
 Any player is clickable for a detail sheet with a projected-vs-actual chart, a
 full season profile, a "why this Value Score" breakdown, and a week-by-week
@@ -130,6 +130,10 @@ A full season is ~11MB of JSON (17 weeks × stats + projections, plus a 2.5MB
 player dictionary). It's cached in IndexedDB with per-payload TTLs: completed
 weeks for 30 days, the live week for 2 minutes. Recharts is code-split, keeping
 first paint to ~98KB gzipped.
+
+Team-week views are memoized for the lifetime of a loaded season, so pages that
+share optimal-lineup, history and analytics data reuse the same derived result
+instead of rerunning the lineup matcher.
 
 ## A note on the colour scale
 

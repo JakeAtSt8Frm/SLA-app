@@ -195,12 +195,7 @@ export function SchedulePage() {
   return (
     <>
       <div className="page-head">
-        <div>
-          <h1 className="page-title">Schedule</h1>
-          <div className="small muted">
-            {data.season} season · week {week} · rostered players and custom scores overlaid
-          </div>
-        </div>
+        <h1 className="page-title">Schedule</h1>
       </div>
 
       <div className="filters">
@@ -247,7 +242,7 @@ export function SchedulePage() {
                 ),
               )}
             />
-            <StatTile label="On bye" value={String(byeCount)} sub="rostered leaguewide" />
+            <StatTile label="On bye" value={String(byeCount)} />
           </StatTileRow>
 
           <div style={{ height: 16 }} />

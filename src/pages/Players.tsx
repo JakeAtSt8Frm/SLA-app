@@ -80,12 +80,7 @@ export function PlayersPage() {
   return (
     <>
       <div className="page-head">
-        <div>
-          <h1 className="page-title">Available Players</h1>
-          <div className="small muted">
-            Ranked by Value Score within position group · {data.valueIndex.byPlayer.size} rated
-          </div>
-        </div>
+        <h1 className="page-title">Available Players</h1>
       </div>
 
       <div className="filters">
