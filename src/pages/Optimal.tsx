@@ -1,0 +1,259 @@
+/**
+ * Optimal Lineup — what the best legal lineup was, and what it cost to miss it.
+ *
+ * The solver runs a true maximum-weight matching rather than filling slots
+ * greedily, which matters in a superflex league: the QB that belongs in the
+ * SUPER_FLEX slot depends on who else is eligible for it.
+ */
+
+import { useMemo, useState } from 'react';
+import { useLeague, useLeagueData } from '../data/LeagueProvider';
+import { buildHeatmap, buildRosterWeek } from '../data/selectors';
+import { PlayerModal } from '../components/PlayerModal';
+import { Heatmap } from '../components/Heatmap';
+import { EmptyState, StatTile, StatTileRow, fmt1, fmtPct } from '../components/primitives';
+import { playerHeadshot, teamLogo } from '../lib/sleeper';
+import { playerName } from '../data/league';
+
+export function OptimalPage() {
+  const data = useLeagueData();
+  const { week, selectedRosterId, setSelectedRosterId } = useLeague();
+  const [openPid, setOpenPid] = useState<string | null>(null);
+
+  const rosterId = selectedRosterId ?? data.teams[0]?.rosterId ?? null;
+
+  const rosterWeek = useMemo(
+    () => (rosterId === null ? null : buildRosterWeek(data, rosterId, week)),
+    [data, rosterId, week],
+  );
+
+  /** Optimal-lineup efficiency for every team this week, for the comparison table. */
+  const leagueEfficiency = useMemo(
+    () =>
+      data.teams
+        .map((team) => {
+          const rw = buildRosterWeek(data, team.rosterId, week);
+          return {
+            rosterId: team.rosterId,
+            name: team.name,
+            actual: rw?.actualTotal ?? 0,
+            optimal: rw?.optimalTotal ?? 0,
+            efficiency: rw?.efficiency ?? 0,
+          };
+        })
+        .sort((a, b) => b.efficiency - a.efficiency),
+    [data, week],
+  );
+
+  const heatmapRows = useMemo(
+    () => buildHeatmap(data, week, 'starters', 'projected'),
+    [data, week],
+  );
+
+  if (!rosterWeek) return <EmptyState title="No team selected" />;
+
+  const { team, optimalLineup, actualTotal, optimalTotal, efficiency, starters } = rosterWeek;
+  const startedIds = new Set(starters.map((p) => p.pid));
+
+  // Which optimal picks were actually benched — the actionable part.
+  const missed = optimalLineup.assignments.filter(
+    (a) => a.pid && !startedIds.has(a.pid),
+  );
+
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">Optimal Lineup</h1>
+          <div className="small muted">
+            {team.name} · Week {week} · best legal lineup under this league's scoring
+          </div>
+        </div>
+      </div>
+
+      <div className="filters">
+        <div className="segmented" role="group" aria-label="Select team">
+          {data.teams.map((t) => (
+            <button
+              key={t.rosterId}
+              aria-pressed={t.rosterId === rosterId}
+              onClick={() => setSelectedRosterId(t.rosterId)}
+            >
+              {t.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <StatTileRow>
+        <StatTile label="You started" value={fmt1(actualTotal)} />
+        <StatTile label="Optimal" value={fmt1(optimalTotal)} />
+        <StatTile
+          label="Left on bench"
+          value={fmt1(Math.max(0, optimalTotal - actualTotal))}
+          tone={optimalTotal - actualTotal > 20 ? 'var(--danger-text)' : undefined}
+        />
+        <StatTile
+          label="Efficiency"
+          value={fmtPct(efficiency, 1)}
+          tone={efficiency >= 0.95 ? 'var(--success-text)' : undefined}
+        />
+      </StatTileRow>
+
+      <div style={{ height: 16 }} />
+
+      <div className="grid-2">
+        <section className="card" style={{ overflow: 'hidden' }}>
+          <div className="group-head" style={{ position: 'static' }}>
+            <span>Optimal lineup</span>
+            <span className="mono">{fmt1(optimalTotal)}</span>
+          </div>
+
+          <div className="scroll-x">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Slot</th>
+                  <th>Player</th>
+                  <th className="num">Points</th>
+                  <th>Started?</th>
+                </tr>
+              </thead>
+              <tbody>
+                {optimalLineup.assignments.map((a) => {
+                  const player = a.pid ? data.playersById.get(a.pid) : undefined;
+                  const wasStarted = a.pid ? startedIds.has(a.pid) : false;
+                  return (
+                    <tr key={`${a.slot}-${a.slotIndex}`}>
+                      <td className="tiny bold muted">{a.slot.replace(/_/g, ' ')}</td>
+                      <td>
+                        {a.pid ? (
+                          <button
+                            className="row"
+                            style={{ gap: 8, textAlign: 'left' }}
+                            onClick={() => setOpenPid(a.pid)}
+                          >
+                            <img
+                              src={playerHeadshot(a.pid)}
+                              alt=""
+                              width={26}
+                              height={26}
+                              loading="lazy"
+                              style={{ borderRadius: '50%', background: 'var(--surface-sunken)' }}
+                              onError={(e) => {
+                                const img = e.currentTarget;
+                                const fb = teamLogo(player?.team);
+                                if (fb && img.src !== fb) img.src = fb;
+                                else img.style.visibility = 'hidden';
+                              }}
+                            />
+                            <span style={{ fontWeight: 600 }}>{playerName(player, a.pid)}</span>
+                          </button>
+                        ) : (
+                          <span className="muted">— empty —</span>
+                        )}
+                      </td>
+                      <td className="num bold">{fmt1(a.points)}</td>
+                      <td>
+                        {a.pid ? (
+                          wasStarted ? (
+                            <span className="chip" style={{ color: 'var(--success-text)' }}>
+                              ▲ yes
+                            </span>
+                          ) : (
+                            <span className="chip" style={{ color: 'var(--danger-text)' }}>
+                              ▼ benched
+                            </span>
+                          )
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <div className="stack">
+          {missed.length > 0 && (
+            <section className="card card-pad">
+              <div className="section-title">Misses this week</div>
+              <div className="small muted" style={{ marginBottom: 8 }}>
+                These belonged in the lineup but sat on the bench.
+              </div>
+              <div className="stack" style={{ gap: 6 }}>
+                {missed.map((a) => {
+                  const player = a.pid ? data.playersById.get(a.pid) : undefined;
+                  return (
+                    <button
+                      key={a.pid}
+                      className="row-between"
+                      style={{ width: '100%', padding: '6px 0' }}
+                      onClick={() => a.pid && setOpenPid(a.pid)}
+                    >
+                      <span className="row" style={{ gap: 8, minWidth: 0 }}>
+                        <span className="chip chip-outline">{a.slot.replace(/_/g, ' ')}</span>
+                        <span style={{ fontWeight: 600 }}>{playerName(player, a.pid!)}</span>
+                      </span>
+                      <span className="mono bold">{fmt1(a.points)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          <section className="card" style={{ overflow: 'hidden' }}>
+            <div className="group-head" style={{ position: 'static' }}>
+              <span>League lineup efficiency — week {week}</span>
+            </div>
+            <div className="scroll-x">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Team</th>
+                    <th className="num">Actual</th>
+                    <th className="num">Optimal</th>
+                    <th className="num">Eff.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {leagueEfficiency.map((row) => (
+                    <tr
+                      key={row.rosterId}
+                      style={
+                        row.rosterId === rosterId
+                          ? { background: 'var(--accent-wash)' }
+                          : undefined
+                      }
+                    >
+                      <td>
+                        <button onClick={() => setSelectedRosterId(row.rosterId)}>
+                          {row.name}
+                        </button>
+                      </td>
+                      <td className="num">{fmt1(row.actual)}</td>
+                      <td className="num muted">{fmt1(row.optimal)}</td>
+                      <td className="num bold">{fmtPct(row.efficiency, 1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <Heatmap
+            title={`Projected points by position — week ${week}`}
+            subtitle="Where each team's projected strength sits, relative to the league."
+            rows={heatmapRows}
+            selectedRosterId={rosterId}
+            onSelectTeam={setSelectedRosterId}
+          />
+        </div>
+      </div>
+
+      <PlayerModal pid={openPid} week={week} onClose={() => setOpenPid(null)} />
+    </>
+  );
+}

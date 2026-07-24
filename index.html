@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <!-- viewport-fit=cover lets the bottom nav sit against the iOS safe area -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="description" content="Custom-scored analytics for the SLA fantasy league." />
+    <meta name="theme-color" content="#1a1a19" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#fcfcfb" media="(prefers-color-scheme: light)" />
+
+    <!-- Installable to the iOS home screen -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="SLA" />
+
+    <!-- Warm the connections the first paint depends on -->
+    <link rel="preconnect" href="https://api.sleeper.app" crossorigin />
+    <link rel="preconnect" href="https://api.sleeper.com" crossorigin />
+    <link rel="preconnect" href="https://sleepercdn.com" crossorigin />
+    <link rel="dns-prefetch" href="https://api.sleeper.app" />
+
+    <title>SLA — League Analytics</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

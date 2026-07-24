@@ -1,0 +1,503 @@
+/* ------------------------------------------------------------- topbar --- */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: saturate(180%) blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar__inner {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.brand {
+  font-weight: 900;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  padding: 3px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.topbar__league {
+  font-weight: 700;
+  font-size: 14px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Desktop tab strip */
+.tabs {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 0 16px;
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tabs__link {
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+
+.tabs__link:hover {
+  color: var(--text-primary);
+}
+
+.tabs__link.is-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* Bottom tab bar — phones only */
+.bottom-nav {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .tabs {
+    display: none;
+  }
+
+  .bottom-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 50;
+    display: flex;
+    justify-content: space-around;
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    backdrop-filter: saturate(180%) blur(12px);
+    border-top: 1px solid var(--border);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .bottom-nav__link {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 8px 2px 6px;
+    min-height: 52px;
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .bottom-nav__link.is-active {
+    color: var(--accent);
+  }
+
+  .bottom-nav__icon {
+    font-size: 17px;
+    line-height: 1;
+  }
+}
+
+.progress {
+  max-width: 320px;
+  margin: 12px auto 0;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+
+/* --------------------------------------------------------- player row --- */
+
+.player-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto auto auto auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--grid);
+  transition: background 0.12s ease;
+}
+
+.player-row:hover {
+  background: var(--surface-sunken);
+}
+
+.player-row__avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--surface-sunken);
+  flex-shrink: 0;
+}
+
+.player-row__id {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.player-row__name {
+  font-weight: 650;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.player-row__metrics {
+  display: flex;
+  gap: 4px;
+}
+
+.player-row__num {
+  min-width: 46px;
+  text-align: right;
+  font-size: 14px;
+}
+
+.player-row__status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 52px;
+}
+
+/* Phones: drop the projection column and the metric chips into a second line */
+@media (max-width: 640px) {
+  .player-row {
+    grid-template-columns: auto auto 1fr auto auto;
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .player-row__metrics {
+    grid-column: 3;
+    grid-row: 2;
+  }
+
+  .player-row__id {
+    grid-row: 1;
+  }
+
+  .player-row__num:not(.bold) {
+    display: none; /* projection hidden; still in the detail sheet */
+  }
+}
+
+/* -------------------------------------------------------- player card --- */
+
+.player-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.player-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+
+.player-card__avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--surface-sunken);
+}
+
+.player-card__scores {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+}
+
+/* ------------------------------------------------------------- sheet --- */
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: fade-in 0.15s ease;
+}
+
+@media (min-width: 761px) {
+  .sheet-backdrop {
+    align-items: center;
+    padding: 24px;
+  }
+}
+
+.sheet {
+  background: var(--surface);
+  width: 100%;
+  max-width: 720px;
+  max-height: 92dvh;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  animation: slide-up 0.2s ease;
+  outline: none;
+}
+
+@media (min-width: 761px) {
+  .sheet {
+    border-radius: var(--radius-lg);
+    max-height: 88vh;
+  }
+}
+
+.sheet__grabber {
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  margin: 8px auto 0;
+}
+
+@media (min-width: 761px) {
+  .sheet__grabber {
+    display: none;
+  }
+}
+
+.sheet__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sheet__avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--surface-sunken);
+  flex-shrink: 0;
+}
+
+.sheet__body {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+}
+
+/* ------------------------------------------------------- metric grid --- */
+
+.metric-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+}
+
+.metric {
+  padding: 8px 10px;
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+/* ----------------------------------------------------------- heatmap --- */
+
+.heatmap {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 2px; /* the 2px surface gap between fills */
+  font-size: 12px;
+}
+
+.heatmap th {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 4px 6px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.heatmap__team-head,
+.heatmap__team {
+  text-align: left !important;
+  position: sticky;
+  left: 0;
+  background: var(--surface);
+  z-index: 1;
+}
+
+.heatmap__team-btn {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text-primary);
+  max-width: 116px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  padding: 2px 0;
+}
+
+.heatmap td {
+  padding: 7px 8px;
+  text-align: right;
+  border-radius: 4px;
+  min-width: 52px;
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+}
+
+.heatmap tr.is-selected .heatmap__team-btn {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.heatmap__legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px 12px;
+}
+
+.heatmap__ramp {
+  display: flex;
+  flex: 1;
+  max-width: 220px;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.heatmap__ramp i {
+  flex: 1;
+}
+
+/* -------------------------------------------------------------- misc --- */
+
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.page-title {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.filters {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.grid-2 {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+}
+
+/* Grid and flex children default to min-width:auto, which lets a wide table
+   push the whole page sideways. Every layout container here opts out. */
+.grid-2 > *,
+.grid-cards > *,
+.stack > *,
+.filters > * {
+  min-width: 0;
+}
+
+.grid-cards {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+}
+
+.group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  position: sticky;
+  top: var(--nav-height);
+  z-index: 2;
+}
