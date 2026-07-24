@@ -105,9 +105,23 @@ export function buildRosterWeek(
   const clean = (ids: (string | null | undefined)[] | null | undefined) =>
     (ids ?? []).map((x) => String(x ?? '')).filter((x) => x && x !== '0');
 
-  // Prefer the historical record; fall back to the live roster.
-  const starterIds = clean(matchup?.starters ?? team.roster.starters);
-  const allIds = clean(matchup?.players ?? team.roster.players);
+  /*
+   * Normally the matchup record wins: it captures who actually started that
+   * week, whereas the roster reflects today's lineup — the distinction is the
+   * whole point of the history page.
+   *
+   * When rosters are overridden to another season, that must not happen. The
+   * matchup belongs to the scoring season, so using it would quietly show that
+   * season's lineup instead of the roster the user asked for.
+   */
+  const useMatchupLineup = !data.rostersOverridden;
+
+  const starterIds = clean(
+    useMatchupLineup ? (matchup?.starters ?? team.roster.starters) : team.roster.starters,
+  );
+  const allIds = clean(
+    useMatchupLineup ? (matchup?.players ?? team.roster.players) : team.roster.players,
+  );
 
   const slots = data.starterSlots;
   const starterSet = new Set(starterIds);
@@ -202,7 +216,9 @@ export function buildHeatmap(
   const weekData = data.weeks.get(week);
 
   return data.teams.map((team) => {
-    const matchup = weekData?.matchups.find((m) => m.roster_id === team.rosterId);
+    const matchup = data.rostersOverridden
+      ? undefined
+      : weekData?.matchups.find((m) => m.roster_id === team.rosterId);
 
     const ids = (
       scope === 'starters'

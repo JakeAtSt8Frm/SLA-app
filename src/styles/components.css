@@ -97,6 +97,27 @@
     display: none;
   }
 
+  /*
+   * The header slides away as you scroll down and returns the moment you scroll
+   * up. On a phone the header plus its controls costs roughly a fifth of the
+   * screen, which is a lot to spend permanently on chrome when you are reading
+   * a 21-row lineup.
+   */
+  .topbar {
+    transition: transform 0.22s ease;
+    will-change: transform;
+  }
+
+  .topbar.is-hidden {
+    transform: translateY(-100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar {
+    transition: none;
+  }
+
   .bottom-nav {
     position: fixed;
     left: 0;
@@ -134,6 +155,74 @@
   }
 }
 
+.topbar__notice {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 5px 16px 7px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-top: 1px solid var(--border);
+}
+
+/* ----------------------------------------------------------- settings --- */
+
+.settings {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: min(310px, calc(100vw - 24px));
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+}
+
+.settings__title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.settings__field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.settings__label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings__hint {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.settings__warn {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--tone-bust) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone-bust) 32%, transparent);
+}
+
+.settings__meta {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
 .progress {
   max-width: 320px;
   margin: 12px auto 0;
@@ -154,7 +243,7 @@
 
 .player-row {
   display: grid;
-  grid-template-columns: auto auto 1fr auto auto auto;
+  grid-template-columns: auto auto 1fr auto auto auto auto;
   align-items: center;
   gap: 10px;
   width: 100%;
@@ -206,6 +295,10 @@
   flex: 0 0 auto;
 }
 
+.player-row__matchup {
+  display: flex;
+}
+
 .player-row__num {
   min-width: 46px;
   text-align: right;
@@ -230,7 +323,7 @@
  */
 @container player-list (max-width: 520px) {
   .player-row {
-    grid-template-columns: auto auto 1fr auto auto;
+    grid-template-columns: auto auto 1fr auto auto auto;
     gap: 8px;
     padding: 8px 10px;
   }
@@ -248,7 +341,15 @@
   margin-left: 0.35em;
 }
 
-.chip__short {
+.chip__lead-long,
+.chip__lead-short {
+  margin-right: 0.35em;
+  font-weight: 800;
+  opacity: 0.85;
+}
+
+.chip__short,
+.chip__lead-short {
   display: none;
 }
 
@@ -263,7 +364,7 @@
  */
 @container player-list (max-width: 430px) {
   .player-row {
-    grid-template-columns: auto 1fr auto auto;
+    grid-template-columns: auto 1fr auto auto auto;
   }
 
   .player-row .avatar {
@@ -280,11 +381,13 @@
     min-width: 0;
   }
 
-  .chip__long {
+  .chip__long,
+  .chip__lead-long {
     display: none;
   }
 
-  .chip__short {
+  .chip__short,
+  .chip__lead-short {
     display: inline;
   }
 
@@ -439,6 +542,9 @@
   border-collapse: separate;
   border-spacing: 2px; /* the 2px surface gap between fills */
   font-size: 12px;
+  /* Breathing room on both ends so the Total column doesn't sit flush against
+     the card edge, and so the first column clears the sticky team names. */
+  padding: 0 10px 2px 0;
 }
 
 .heatmap th {
@@ -597,6 +703,32 @@
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+}
+
+/*
+ * Roster beside its heatmap.
+ *
+ * Single column by default. It only splits once the page is wide enough to
+ * leave the roster ~560px, because a player row needs that much to fit the name
+ * plus the Value and rank pills — below it the name starts truncating, which is
+ * exactly the failure this threshold exists to prevent.
+ */
+.split-roster {
+  display: grid;
+  gap: 12px;
+  align-items: start;
+}
+
+@media (min-width: 1080px) {
+  .split-roster {
+    grid-template-columns: minmax(560px, 1.55fr) minmax(300px, 1fr);
+  }
+
+  /* The heatmap column tracks the page as you scroll the roster. */
+  .split-roster__aside {
+    position: sticky;
+    top: 108px;
+  }
 }
 
 /* Grid and flex children default to min-width:auto, which lets a wide table

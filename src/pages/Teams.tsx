@@ -13,7 +13,14 @@ import { buildHeatmap, buildRosterWeek } from '../data/selectors';
 import { PlayerRow } from '../components/PlayerRow';
 import { PlayerModal } from '../components/PlayerModal';
 import { Heatmap } from '../components/Heatmap';
-import { EmptyState, StatTile, StatTileRow, fmt1, fmtPct } from '../components/primitives';
+import {
+  EmptyState,
+  PlacementBadge,
+  StatTile,
+  StatTileRow,
+  fmt1,
+  fmtPct,
+} from '../components/primitives';
 import type { EnrichedPlayer } from '../lib/types';
 import type { HeatmapMetric, HeatmapScope } from '../data/selectors';
 
@@ -77,7 +84,9 @@ export function TeamsPage() {
     <>
       <div className="page-head">
         <div>
-          <h1 className="page-title">{team.name}</h1>
+          <h1 className="page-title">
+            {team.name} <PlacementBadge placement={team.placement} />
+          </h1>
           <div className="small muted">
             {team.ownerName} · {team.wins}-{team.losses}
             {team.ties ? `-${team.ties}` : ''} · Week {week}
@@ -95,6 +104,7 @@ export function TeamsPage() {
               onClick={() => setSelectedRosterId(t.rosterId)}
             >
               {t.name}
+              {t.placement === 1 ? ' 🏆' : ''}
             </button>
           ))}
         </div>
@@ -129,12 +139,12 @@ export function TeamsPage() {
       <div style={{ height: 16 }} />
 
       {/*
-        The roster runs full width rather than sharing the row with the heatmap.
-        A player line carries the name plus Value and both rank pills, which
-        needs about 500px before the name starts truncating — in a half-width
-        column it was collapsing to nothing.
+        Roster and heatmap sit side by side on a wide screen so the heatmap is
+        visible without scrolling; below 1080px they stack. The split is gated on
+        page width because a player line needs ~560px for the name plus its Value
+        and rank pills before the name starts truncating.
       */}
-      <div className="stack">
+      <div className="split-roster">
         <div className="stack">
           {/* ---- Starters, grouped by slot ---- */}
           <section className="card" style={{ overflow: 'hidden' }}>
@@ -184,27 +194,27 @@ export function TeamsPage() {
           )}
         </div>
 
-        {/* ---- Heatmap + status, below the roster ---- */}
-        <div className="filters" style={{ marginTop: 6, marginBottom: 0 }}>
-          <div className="segmented" role="group" aria-label="Heatmap scope">
-            <button aria-pressed={scope === 'starters'} onClick={() => setScope('starters')}>
-              Starters
-            </button>
-            <button aria-pressed={scope === 'all'} onClick={() => setScope('all')}>
-              Full roster
-            </button>
+        {/* ---- Heatmap + status ---- */}
+        <div className="stack split-roster__aside">
+          <div className="filters" style={{ marginBottom: 0 }}>
+            <div className="segmented" role="group" aria-label="Heatmap scope">
+              <button aria-pressed={scope === 'starters'} onClick={() => setScope('starters')}>
+                Starters
+              </button>
+              <button aria-pressed={scope === 'all'} onClick={() => setScope('all')}>
+                Full roster
+              </button>
+            </div>
+            <div className="segmented" role="group" aria-label="Heatmap metric">
+              <button aria-pressed={metric === 'actual'} onClick={() => setMetric('actual')}>
+                Actual
+              </button>
+              <button aria-pressed={metric === 'projected'} onClick={() => setMetric('projected')}>
+                Projected
+              </button>
+            </div>
           </div>
-          <div className="segmented" role="group" aria-label="Heatmap metric">
-            <button aria-pressed={metric === 'actual'} onClick={() => setMetric('actual')}>
-              Actual
-            </button>
-            <button aria-pressed={metric === 'projected'} onClick={() => setMetric('projected')}>
-              Projected
-            </button>
-          </div>
-        </div>
 
-        <div className="grid-2">
           <Heatmap
             title={`${metric === 'actual' ? 'Actual' : 'Projected'} points by position — week ${week}`}
             subtitle={`${scope === 'starters' ? 'Starting lineups' : 'Full rosters'}. Grouped by a player's real position, not the slot they filled, so an LB started at DL counts under LB. Colour compares teams within each column.`}

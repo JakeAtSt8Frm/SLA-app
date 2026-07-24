@@ -4,11 +4,14 @@
  * tab bar on phones (thumb-reachable, matching platform convention on iOS).
  */
 
+import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useLeague } from '../data/LeagueProvider';
 import { useTheme } from './ThemeProvider';
 import { SEASONS } from '../data/league';
 import { Spinner } from './primitives';
+import { SettingsMenu } from './SettingsMenu';
+import { useHideOnScroll } from './useHideOnScroll';
 
 interface NavItem {
   to: string;
@@ -27,14 +30,28 @@ const NAV: NavItem[] = [
 ];
 
 export function AppShell() {
-  const { status, data, error, progress, season, setSeason, week, setWeek, refresh } = useLeague();
+  const {
+    status,
+    data,
+    error,
+    progress,
+    season,
+    setSeason,
+    rosterSeason,
+    week,
+    setWeek,
+    refresh,
+  } = useLeague();
   const { mode, toggle } = useTheme();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const headerHidden = useHideOnScroll();
 
   const weeks = data ? Array.from({ length: data.maxWeek }, (_, i) => i + 1) : [];
+  const rostersOverridden = rosterSeason !== season;
 
   return (
     <div className="app">
-      <header className="topbar">
+      <header className={`topbar${headerHidden ? ' is-hidden' : ''}`}>
         <div className="topbar__inner">
           <div className="row" style={{ gap: 10, minWidth: 0 }}>
             <span className="brand">SLA</span>
@@ -103,8 +120,32 @@ export function AppShell() {
             >
               ⟳
             </button>
+
+            <div style={{ position: 'relative' }}>
+              <button
+                className={`btn btn-ghost btn-sm${rostersOverridden ? ' is-active' : ''}`}
+                onClick={() => setSettingsOpen((v) => !v)}
+                aria-label="Settings"
+                aria-expanded={settingsOpen}
+                title={
+                  rostersOverridden
+                    ? `Using ${rosterSeason} rosters with ${season} scoring`
+                    : 'Settings'
+                }
+              >
+                ⚙
+              </button>
+              <SettingsMenu open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+            </div>
           </div>
         </div>
+
+        {rostersOverridden && (
+          <div className="topbar__notice">
+            Showing <strong>{rosterSeason}</strong> rosters scored against{' '}
+            <strong>{season}</strong> results.
+          </div>
+        )}
 
         <nav className="tabs" aria-label="Main">
           {NAV.map((item) => (

@@ -80,6 +80,7 @@ export function OptimalPage() {
               onClick={() => setSelectedRosterId(t.rosterId)}
             >
               {t.name}
+              {t.placement === 1 ? ' 🏆' : ''}
             </button>
           ))}
         </div>

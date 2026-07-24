@@ -19,6 +19,12 @@ interface LeagueContextValue {
   progress: LoadProgress | null;
   season: string;
   setSeason: (season: string) => void;
+  /**
+   * Season the rosters are read from. Normally equal to `season`; set it to
+   * view one year's rosters against another year's scoring.
+   */
+  rosterSeason: string;
+  setRosterSeason: (season: string) => void;
   /** Week the user is currently viewing. */
   week: number;
   setWeek: (week: number) => void;
@@ -31,6 +37,7 @@ interface LeagueContextValue {
 const LeagueContext = createContext<LeagueContextValue | null>(null);
 
 const SEASON_KEY = 'sla.season';
+const ROSTER_SEASON_KEY = 'sla.rosterSeason';
 
 function initialSeason(): string {
   try {
@@ -46,6 +53,16 @@ function initialSeason(): string {
 
 export function LeagueProvider({ children }: { children: ReactNode }) {
   const [season, setSeasonState] = useState(initialSeason);
+  // Empty string means "follow the scoring season", which is the normal case.
+  const [rosterOverride, setRosterOverride] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(ROSTER_SEASON_KEY);
+      if (saved && SEASON_LEAGUES[saved]) return saved;
+    } catch {
+      /* storage unavailable */
+    }
+    return '';
+  });
   const [status, setStatus] = useState<Status>('idle');
   const [data, setData] = useState<LeagueData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +85,7 @@ export function LeagueProvider({ children }: { children: ReactNode }) {
         if (!cancelled) setProgress(p);
       },
       controller.signal,
+      rosterOverride || undefined,
     )
       .then((result) => {
         if (cancelled) return;
@@ -90,7 +108,7 @@ export function LeagueProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       controller.abort();
     };
-  }, [season, reloadToken]);
+  }, [season, rosterOverride, reloadToken]);
 
   const setSeason = useCallback((next: string) => {
     setSeasonState(next);
@@ -100,6 +118,24 @@ export function LeagueProvider({ children }: { children: ReactNode }) {
       /* non-fatal */
     }
   }, []);
+
+  /**
+   * Sets the roster season. Passing the scoring season (or anything unknown)
+   * clears the override, so the two stay linked by default.
+   */
+  const setRosterSeason = useCallback(
+    (next: string) => {
+      const value = next && next !== season && SEASON_LEAGUES[next] ? next : '';
+      setRosterOverride(value);
+      try {
+        if (value) localStorage.setItem(ROSTER_SEASON_KEY, value);
+        else localStorage.removeItem(ROSTER_SEASON_KEY);
+      } catch {
+        /* non-fatal */
+      }
+    },
+    [season],
+  );
 
   const refresh = useCallback(() => {
     void cacheClear().then(() => setReloadToken((n) => n + 1));
@@ -113,13 +149,27 @@ export function LeagueProvider({ children }: { children: ReactNode }) {
       progress,
       season,
       setSeason,
+      rosterSeason: rosterOverride || season,
+      setRosterSeason,
       week,
       setWeek,
       selectedRosterId,
       setSelectedRosterId,
       refresh,
     }),
-    [status, data, error, progress, season, setSeason, week, selectedRosterId, refresh],
+    [
+      status,
+      data,
+      error,
+      progress,
+      season,
+      setSeason,
+      rosterOverride,
+      setRosterSeason,
+      week,
+      selectedRosterId,
+      refresh,
+    ],
   );
 
   return <LeagueContext.Provider value={value}>{children}</LeagueContext.Provider>;

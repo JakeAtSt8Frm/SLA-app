@@ -10,7 +10,15 @@
 import { useMemo, useState } from 'react';
 import { useLeague, useLeagueData } from '../data/LeagueProvider';
 import { buildRosterWeek } from '../data/selectors';
-import { EmptyState, MatchupChip, StatTile, StatTileRow, fmt1, fmtPct } from '../components/primitives';
+import {
+  EmptyState,
+  MatchupChip,
+  PlacementBadge,
+  StatTile,
+  StatTileRow,
+  fmt1,
+  fmtPct,
+} from '../components/primitives';
 import { POSITION_GROUPS, type PositionGroup } from '../lib/types';
 
 export function AnalyticsPage() {
@@ -137,7 +145,7 @@ export function AnalyticsPage() {
                   <tr key={t.rosterId}>
                     <td>
                       <button className="bold" onClick={() => setSelectedRosterId(t.rosterId)}>
-                        {t.name}
+                        {t.name} <PlacementBadge placement={t.placement} />
                       </button>
                       <div className="tiny muted">{t.ownerName}</div>
                     </td>

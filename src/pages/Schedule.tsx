@@ -82,7 +82,11 @@ export function SchedulePage() {
     const weekData = data.weeks.get(week);
 
     for (const team of data.teams) {
-      const matchup = weekData?.matchups.find((m) => m.roster_id === team.rosterId);
+      // Matchup lineups belong to the scoring season, so they're ignored when
+      // the rosters have been overridden to a different year.
+      const matchup = data.rostersOverridden
+        ? undefined
+        : weekData?.matchups.find((m) => m.roster_id === team.rosterId);
       const starters = new Set(
         (matchup?.starters ?? team.roster.starters ?? []).map((x) => String(x ?? '')),
       );

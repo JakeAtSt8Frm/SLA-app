@@ -43,7 +43,7 @@ export function StatusBadge({ status, compact }: { status: PlayerStatus; compact
  * Sequential single-hue fill for magnitude; the number itself sits in whichever
  * ink contrasts against the generated fill rather than being colour-coded.
  */
-export function ValueChip({ score, label = 'VAL' }: { score: number | null; label?: string }) {
+export function ValueChip({ score }: { score: number | null }) {
   const { mode } = useTheme();
   const { background, ink } = valueScoreFill(score, mode);
 
@@ -51,8 +51,12 @@ export function ValueChip({ score, label = 'VAL' }: { score: number | null; labe
     <span
       className="chip mono"
       style={{ background, color: ink }}
-      title={`${label} ${score ?? '—'} of 1000`}
+      title={`Value ${score ?? '—'} of 1000`}
     >
+      {/* Labelled so the number is self-describing; collapses to "V" when the
+          container is too narrow to spell it out. */}
+      <span className="chip__lead-long">Value</span>
+      <span className="chip__lead-short">V</span>
       {score === null ? '—' : score}
     </span>
   );
@@ -147,6 +151,31 @@ export function StatTileRow({ children }: { children: React.ReactNode }) {
     >
       {children}
     </div>
+  );
+}
+
+/**
+ * Placement marker for a finished season.
+ *
+ * Only rendered when the playoff bracket has resolved, so it never appears
+ * mid-season or on a league that hasn't played its final.
+ */
+export function PlacementBadge({ placement }: { placement: number | null }) {
+  if (placement === null || placement > 3) return null;
+
+  const marks: Record<number, { icon: string; label: string }> = {
+    1: { icon: '🏆', label: 'League champion' },
+    2: { icon: '🥈', label: 'Runner-up' },
+    3: { icon: '🥉', label: 'Third place' },
+  };
+
+  const mark = marks[placement];
+  if (!mark) return null;
+
+  return (
+    <span title={mark.label} aria-label={mark.label} role="img">
+      {mark.icon}
+    </span>
   );
 }
 

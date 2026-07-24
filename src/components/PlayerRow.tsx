@@ -74,7 +74,6 @@ export function PlayerRow({ player: p, onSelect, showProjection = true, note }: 
           <ValueChip score={p.valueScore} />
           <RankPill rank={p.totalRank} kind="Total" />
           <RankPill rank={p.ppgRank} kind="PPG" />
-          <MatchupChip score={p.matchupScore} />
           {p.isOut && (
             <span className="chip" style={{ color: 'var(--danger-text)' }}>
               OUT
@@ -86,6 +85,12 @@ export function PlayerRow({ player: p, onSelect, showProjection = true, note }: 
           {p.opponent ? ` vs ${p.opponent}` : ''}
           {note ? ` · ${note}` : ''}
         </span>
+      </span>
+
+      {/* Matchup sits with the numbers on the right, not with the identity
+          pills — it describes this week's opponent, not the player. */}
+      <span className="player-row__matchup">
+        <MatchupChip score={p.matchupScore} />
       </span>
 
       {showProjection && (

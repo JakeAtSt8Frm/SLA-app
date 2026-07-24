@@ -18,6 +18,7 @@ import {
   getUsers,
   getWeekProjections,
   getWeekStats,
+  getWinnersBracket,
 } from '../lib/sleeper';
 import { compileScoring, createScorer, groupForPlayer, type ScoringModel } from '../lib/scoring';
 import { buildValueIndex, type ValueIndex } from '../lib/value';
@@ -53,6 +54,36 @@ export interface TeamInfo {
   pointsFor: number;
   pointsAgainst: number;
   roster: Roster;
+  /** Final placement from the playoff bracket: 1 = champion. */
+  placement: number | null;
+}
+
+/**
+ * Final standings from the winners bracket.
+ *
+ * Sleeper marks placement games with a `p` field — `p: 1` is the championship,
+ * `p: 3` the third-place game — so the champion is the winner of the `p: 1`
+ * match rather than whoever finished top of the regular season.
+ */
+export interface BracketMatch {
+  p?: number;
+  w?: number | null;
+  l?: number | null;
+}
+
+export function placementsFromBracket(bracket: BracketMatch[]): Map<number, number> {
+  const placements = new Map<number, number>();
+
+  for (const match of bracket ?? []) {
+    if (typeof match?.p !== 'number') continue;
+    // The winner takes the placement, the loser the one below it.
+    if (typeof match.w === 'number') placements.set(match.w, match.p);
+    if (typeof match.l === 'number' && !placements.has(match.l)) {
+      placements.set(match.l, match.p + 1);
+    }
+  }
+
+  return placements;
 }
 
 export interface WeekData {
@@ -65,7 +96,21 @@ export interface WeekData {
 
 export interface LeagueData {
   season: string;
+  /** Season the rosters came from — differs from `season` when overridden. */
+  rosterSeason: string;
   league: League;
+  /** The league the rosters were read from, when it isn't `league`. */
+  rosterLeague: League | null;
+  /**
+   * True when rosters come from a different season than the scoring.
+   *
+   * Consumers must not read lineups out of the weekly matchup records in this
+   * mode: those belong to the scoring season and would silently override the
+   * roster the user asked to see.
+   */
+  rostersOverridden: boolean;
+  /** Roster id of the champion, when the season has a completed bracket. */
+  championRosterId: number | null;
   nflState: NflState;
   scoringModel: ScoringModel;
   score: (stats: StatLine | undefined | null) => number;
@@ -138,13 +183,27 @@ async function mapLimit<T, R>(
   return results;
 }
 
+/**
+ * Loads a season.
+ *
+ * `rosterSeason` lets the rosters come from a different year than the scoring
+ * and stats — e.g. "show me 2026's rosters scored against 2025's results", which
+ * is how you evaluate a keeper or draft class against known production. When it
+ * is omitted (the normal case) both come from the same league.
+ */
 export async function loadLeague(
   season: string,
   onProgress?: (p: LoadProgress) => void,
   signal?: AbortSignal,
+  rosterSeason?: string,
 ): Promise<LeagueData> {
   const leagueId = SEASON_LEAGUES[season];
   if (!leagueId) throw new Error(`No league configured for season ${season}`);
+
+  const effectiveRosterSeason =
+    rosterSeason && SEASON_LEAGUES[rosterSeason] ? rosterSeason : season;
+  const rosterLeagueId = SEASON_LEAGUES[effectiveRosterSeason];
+  const rostersAreOverridden = rosterLeagueId !== leagueId;
 
   const report = (phase: string, loaded: number, total: number) =>
     onProgress?.({ phase, loaded, total });
@@ -161,11 +220,22 @@ export async function loadLeague(
 
   report('Loading rosters', 0, 1);
 
-  const [users, rosters, playersRaw] = await Promise.all([
-    cached(`users:${leagueId}`, TTL.ROSTERS, () => getUsers(leagueId, signal)),
-    cached(`rosters:${leagueId}`, TTL.ROSTERS, () => getRosters(leagueId, signal)),
+  const [users, rosters, playersRaw, bracket, rosterLeague] = await Promise.all([
+    cached(`users:${rosterLeagueId}`, TTL.ROSTERS, () => getUsers(rosterLeagueId, signal)),
+    cached(`rosters:${rosterLeagueId}`, TTL.ROSTERS, () => getRosters(rosterLeagueId, signal)),
     cached(`players`, TTL.PLAYERS, () => getAllPlayers(signal)),
+    // The bracket only exists once the playoffs have been seeded.
+    cached(`bracket:${leagueId}`, TTL.LEAGUE, () =>
+      getWinnersBracket(leagueId, signal).catch(() => [] as unknown[]),
+    ),
+    rostersAreOverridden
+      ? cached(`league:${rosterLeagueId}`, TTL.LEAGUE, () => getLeague(rosterLeagueId, signal))
+      : Promise.resolve(null),
   ]);
+
+  const placements = placementsFromBracket(bracket as BracketMatch[]);
+  const championRosterId =
+    [...placements.entries()].find(([, place]) => place === 1)?.[0] ?? null;
 
   const playersById = new Map<string, Player>(Object.entries(playersRaw));
   const usersById = new Map<string, SleeperUser>(users.map((u) => [u.user_id, u]));
@@ -192,6 +262,11 @@ export async function loadLeague(
         pointsFor: Math.round(pf * 100) / 100,
         pointsAgainst: Math.round(pa * 100) / 100,
         roster,
+        // Placement belongs to the scoring season's bracket, so it is only
+        // meaningful when the rosters come from that same season.
+        placement: rostersAreOverridden
+          ? null
+          : (placements.get(roster.roster_id) ?? null),
       };
     })
     .sort((a, b) => b.wins - a.wins || b.pointsFor - a.pointsFor);
@@ -278,7 +353,11 @@ export async function loadLeague(
 
   return {
     season,
+    rosterSeason: effectiveRosterSeason,
     league,
+    rosterLeague,
+    rostersOverridden: rostersAreOverridden,
+    championRosterId: rostersAreOverridden ? null : championRosterId,
     nflState,
     scoringModel,
     score,
