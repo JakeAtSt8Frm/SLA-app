@@ -9,8 +9,7 @@
 
 import { useMemo, useState } from 'react';
 import { useLeague, useLeagueData } from '../data/LeagueProvider';
-import { buildHeatmap, buildRosterWeek, buildStarterStrength } from '../data/selectors';
-import type { TeamStarterStrength } from '../data/selectors';
+import { buildHeatmap, buildRosterWeek } from '../data/selectors';
 import { PlayerRow } from '../components/PlayerRow';
 import { PlayerModal } from '../components/PlayerModal';
 import { Heatmap } from '../components/Heatmap';
@@ -26,7 +25,7 @@ import {
 } from '../components/primitives';
 import { POSITION_GROUPS } from '../lib/types';
 import type { EnrichedPlayer, PositionGroup } from '../lib/types';
-import type { HeatmapMetric, HeatmapScope } from '../data/selectors';
+import type { HeatmapMetric, HeatmapRow, HeatmapScope } from '../data/selectors';
 
 /** Display order and labels for starter slot groups. */
 const SLOT_GROUPS: Array<{ key: string; label: string; slots: string[] }> = [
@@ -61,16 +60,19 @@ export function TeamsPage() {
     [data, rosterId, week],
   );
 
-  // Where this team's *starting lineup* ranks league-wide, overall and by
-  // position — the starter-based counterpart to Analytics' whole-roster power.
-  // Each row carries both a rank (for colour) and a strength percentage of the
-  // league leader (for the bar length), mirroring the Analytics power list.
-  const starterStrength = useMemo(() => buildStarterStrength(data), [data]);
+  // How this team's starters rank league-wide for the selected week's points,
+  // overall and by position — matching the week-scoped heatmap beside it. Each
+  // row carries a rank (for colour) and a share of the league leader (for the
+  // bar length), mirroring the Analytics power list. Starters only, always.
+  const starterScoring = useMemo(
+    () => buildHeatmap(data, week, 'starters', 'actual'),
+    [data, week],
+  );
   const starterRank = useMemo(() => {
     if (rosterId === null) return null;
-    const outOf = starterStrength.length;
-    const build = (pick: (t: TeamStarterStrength) => number) => {
-      const values = starterStrength.map((t) => ({ rosterId: t.rosterId, v: pick(t) }));
+    const outOf = starterScoring.length;
+    const build = (pick: (r: HeatmapRow) => number) => {
+      const values = starterScoring.map((r) => ({ rosterId: r.rosterId, v: pick(r) }));
       const max = Math.max(1, ...values.map((x) => x.v));
       const rank =
         [...values].sort((a, b) => b.v - a.v).findIndex((x) => x.rosterId === rosterId) + 1;
@@ -78,10 +80,10 @@ export function TeamsPage() {
       return { rank, pct: (mine / max) * 100 };
     };
     const byGroup = Object.fromEntries(
-      POSITION_GROUPS.map((group) => [group, build((t) => t.positionAverages[group])]),
+      POSITION_GROUPS.map((group) => [group, build((r) => r.byGroup[group])]),
     ) as Record<PositionGroup, { rank: number; pct: number }>;
-    return { outOf, overall: build((t) => t.avg), byGroup };
-  }, [starterStrength, rosterId]);
+    return { outOf, overall: build((r) => r.total), byGroup };
+  }, [starterScoring, rosterId]);
 
   const heatmapRows = useMemo(
     () => buildHeatmap(data, week, scope, metric),

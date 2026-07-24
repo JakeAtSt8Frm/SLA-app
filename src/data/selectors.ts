@@ -10,7 +10,6 @@
 import { groupForPlayer, hasPlayed } from '../lib/scoring';
 import { classifyStatus } from '../lib/status';
 import { computeOptimalLineup, lineupEfficiency, slotAccepts } from '../lib/optimal';
-import { POSITION_GROUPS } from '../lib/types';
 import type { EnrichedPlayer, PositionGroup, StatLine } from '../lib/types';
 import { isOut, playerName, type LeagueData, type TeamInfo } from './league';
 
@@ -211,63 +210,6 @@ function round2(n: number): number {
 /** Bench ordering: whoever most deserved a start appears first. */
 function sortByImpact(a: EnrichedPlayer, b: EnrichedPlayer): number {
   return b.act - a.act || b.proj - a.proj || (b.valueScore ?? 0) - (a.valueScore ?? 0);
-}
-
-/* -------------------------------------------------------------------------- */
-/* Starter strength                                                            */
-/* -------------------------------------------------------------------------- */
-
-function emptyGroupTotals(): Record<PositionGroup, number> {
-  return Object.fromEntries(POSITION_GROUPS.map((g) => [g, 0])) as Record<
-    PositionGroup,
-    number
-  >;
-}
-
-export interface TeamStarterStrength {
-  rosterId: number;
-  /** Mean custom-scored points the team's actual starters produced per week. */
-  avg: number;
-  /** That weekly average split by position group. */
-  positionAverages: Record<PositionGroup, number>;
-}
-
-/**
- * Season-long starter strength for every team: how many custom-scored points
- * each team's *actual starters* have produced per week, in total and split by
- * position group.
- *
- * This is the starter-based counterpart to the roster-value power ranking on
- * Analytics. Where that ranks whole-roster talent, this answers "how good has
- * this team's starting lineup actually been" — which is what the roster page
- * ranks a team against the rest of the league.
- */
-export function buildStarterStrength(data: LeagueData): TeamStarterStrength[] {
-  return data.teams.map((team) => {
-    const weekly: Array<{ actual: number; byGroup: Record<PositionGroup, number> }> = [];
-
-    for (let week = 1; week <= data.currentWeek; week++) {
-      const rosterWeek = buildRosterWeek(data, team.rosterId, week);
-      if (!rosterWeek || rosterWeek.starters.length === 0) continue;
-      const byGroup = emptyGroupTotals();
-      for (const player of rosterWeek.starters) {
-        if (player.group) byGroup[player.group] += player.act;
-      }
-      weekly.push({ actual: rosterWeek.actualTotal, byGroup });
-    }
-
-    const positionAverages = emptyGroupTotals();
-    for (const group of POSITION_GROUPS) {
-      positionAverages[group] = weekly.length
-        ? weekly.reduce((sum, row) => sum + row.byGroup[group], 0) / weekly.length
-        : 0;
-    }
-    const avg = weekly.length
-      ? weekly.reduce((sum, row) => sum + row.actual, 0) / weekly.length
-      : 0;
-
-    return { rosterId: team.rosterId, avg, positionAverages };
-  });
 }
 
 /* -------------------------------------------------------------------------- */
