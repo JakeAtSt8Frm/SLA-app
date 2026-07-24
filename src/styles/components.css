@@ -576,25 +576,25 @@
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 2px; /* the 2px surface gap between fills */
-  font-size: 12px;
+  font-size: 11px;
   /* Breathing room on both ends so the Total column doesn't sit flush against
      the card edge, and so the first column clears the sticky team names. */
-  padding: 0 10px 2px 0;
+  padding: 0 8px 2px 0;
 }
 
 .heatmap th {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-muted);
-  padding: 4px 6px;
+  padding: 4px 2px;
   text-align: center;
   white-space: nowrap;
 }
 
 .heatmap__team-col {
-  width: 96px;
+  width: 82px;
 }
 
 .heatmap__team-head,
@@ -607,10 +607,10 @@
 }
 
 .heatmap__team-btn {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 650;
   color: var(--text-primary);
-  max-width: 116px;
+  max-width: 96px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -619,25 +619,26 @@
 }
 
 .heatmap td {
-  padding: 7px 3px;
+  padding: 6px 2px;
   text-align: center;
-  font-size: 11px;
+  font-size: 10px;
   border-radius: 4px;
   min-width: 0;
   background: var(--surface-sunken);
   color: var(--text-secondary);
 }
 
-/* Eight positions plus Total fit without a desktop scrollbar. On a phone the
-   cells retain a readable minimum and the existing touch scroller takes over. */
+/* Nine positions (QB, SF and the rest) plus Total fit without a desktop
+   scrollbar. On a phone the cells retain a readable minimum and the existing
+   touch scroller takes over. */
 @media (max-width: 600px) {
   .heatmap {
     table-layout: auto;
-    min-width: 610px;
+    min-width: 660px;
   }
 
   .heatmap td {
-    min-width: 48px;
+    min-width: 44px;
   }
 }
 
@@ -927,22 +928,3 @@
   }
 }
 
-/* ------------------------------------------------- starter power rank --- */
-
-/*
- * The roster page's starter power rank reuses the Analytics power-list bars.
- * The compact variant drops the leading rank column and tightens spacing so the
- * list of one team's positions fits the narrow roster-page aside: a position
- * label, a strength bar (coloured red→yellow→green by rank), and the ordinal.
- */
-.power-list--compact {
-  gap: 8px;
-}
-
-.power-row--compact {
-  grid-template-columns: 68px minmax(64px, 1fr) 44px;
-}
-
-.power-row--compact .power-team {
-  font-weight: 600;
-}

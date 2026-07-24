@@ -216,24 +216,54 @@ function sortByImpact(a: EnrichedPlayer, b: EnrichedPlayer): number {
 /* Heatmap data                                                                */
 /* -------------------------------------------------------------------------- */
 
-export const HEATMAP_GROUPS: PositionGroup[] = ['QB', 'RB', 'WR', 'TE', 'K', 'DL', 'LB', 'DB'];
+/**
+ * Heatmap columns. `SF` is the superflex slot pulled out of the QB group so a
+ * team's dedicated QB and its second passer (or whoever they flex there) read
+ * separately — the SF slot is the defining strategic choice in this league.
+ * It's a slot, not a position group, so it only carries points in the starters
+ * view; in the full-roster view it stays empty and the column hides itself.
+ */
+export type HeatmapColumn = PositionGroup | 'SF';
+export const HEATMAP_COLUMNS: HeatmapColumn[] = [
+  'QB',
+  'SF',
+  'RB',
+  'WR',
+  'TE',
+  'K',
+  'DL',
+  'LB',
+  'DB',
+];
 
 export interface HeatmapRow {
   rosterId: number;
   name: string;
-  byGroup: Record<PositionGroup, number>;
+  byGroup: Record<HeatmapColumn, number>;
   total: number;
 }
 
 export type HeatmapScope = 'starters' | 'all';
 export type HeatmapMetric = 'projected' | 'actual';
 
+function emptyColumns(): Record<HeatmapColumn, number> {
+  return Object.fromEntries(HEATMAP_COLUMNS.map((c) => [c, 0])) as Record<
+    HeatmapColumn,
+    number
+  >;
+}
+
 /**
- * Builds one heatmap: a team x position-group grid of custom-scored points.
+ * Builds one heatmap: a team x position grid of custom-scored points.
  *
  * This is the view that makes positional strength legible at a glance — with
  * seven of twenty-one starting slots being IDP in this league, "who is deep at
  * linebacker" is a real strategic question that a flat roster list hides.
+ *
+ * In the starters view, points are bucketed by the slot each player filled, so
+ * the dedicated QB slot and the superflex (`SF`) slot are separated. In the
+ * full-roster view there are no slots, so everyone is bucketed by position group
+ * and the SF column stays empty.
  */
 export function buildHeatmap(
   data: LeagueData,
@@ -242,39 +272,89 @@ export function buildHeatmap(
   metric: HeatmapMetric,
 ): HeatmapRow[] {
   const weekData = data.weeks.get(week);
+  const slots = data.starterSlots;
+
+  const scoreOf = (pid: string) => {
+    const line = metric === 'actual' ? weekData?.stats[pid] : weekData?.projections[pid];
+    return data.score(line);
+  };
 
   return data.teams.map((team) => {
     const matchup = data.rostersOverridden
       ? undefined
       : weekData?.matchups.find((m) => m.roster_id === team.rosterId);
 
-    const ids = (
-      scope === 'starters'
-        ? (matchup?.starters ?? team.roster.starters ?? [])
-        : (matchup?.players ?? team.roster.players ?? [])
-    )
-      .map((x) => String(x ?? ''))
-      .filter((x) => x && x !== '0');
+    const byGroup = emptyColumns();
 
-    const byGroup = Object.fromEntries(
-      HEATMAP_GROUPS.map((g) => [g, 0]),
-    ) as Record<PositionGroup, number>;
-
-    for (const pid of ids) {
-      const group = groupForPlayer(data.playersById.get(pid));
-      if (!group) continue;
-      const line =
-        metric === 'actual' ? weekData?.stats[pid] : weekData?.projections[pid];
-      byGroup[group] += data.score(line);
+    if (scope === 'starters') {
+      const starters = matchup?.starters ?? team.roster.starters ?? [];
+      // Preserve index so each starter maps to its slot.
+      starters.forEach((raw, i) => {
+        const pid = String(raw ?? '');
+        if (!pid || pid === '0') return;
+        const slot = String(slots[i] ?? '').toUpperCase();
+        const points = scoreOf(pid);
+        if (slot === 'QB') {
+          byGroup.QB += points;
+        } else if (slot === 'SUPER_FLEX' || slot === 'OP') {
+          byGroup.SF += points;
+        } else {
+          const group = groupForPlayer(data.playersById.get(pid));
+          if (group) byGroup[group] += points;
+        }
+      });
+    } else {
+      const ids = (matchup?.players ?? team.roster.players ?? [])
+        .map((x) => String(x ?? ''))
+        .filter((x) => x && x !== '0');
+      for (const pid of ids) {
+        const group = groupForPlayer(data.playersById.get(pid));
+        if (!group) continue;
+        byGroup[group] += scoreOf(pid);
+      }
     }
 
     let total = 0;
-    for (const g of HEATMAP_GROUPS) {
-      byGroup[g] = round2(byGroup[g]);
-      total += byGroup[g];
+    for (const c of HEATMAP_COLUMNS) {
+      byGroup[c] = round2(byGroup[c]);
+      total += byGroup[c];
     }
 
     return { rosterId: team.rosterId, name: team.name, byGroup, total: round2(total) };
+  });
+}
+
+/**
+ * Turns a points heatmap into a rank heatmap: each cell becomes the team's rank
+ * in that column for the week (1 = highest points). Ties share a rank. Columns
+ * where nobody scored are left at 0 so they hide, exactly as in the points grid,
+ * keeping the two heatmaps the same shape and size.
+ */
+export function buildRankHeatmap(rows: HeatmapRow[]): HeatmapRow[] {
+  const rankOf = (value: number, values: number[]) =>
+    1 + values.filter((v) => v > value).length;
+
+  const columnActive = HEATMAP_COLUMNS.map(
+    (c) => [c, rows.some((r) => r.byGroup[c] !== 0)] as const,
+  );
+  const totalActive = rows.some((r) => r.total !== 0);
+
+  return rows.map((row) => {
+    const byGroup = emptyColumns();
+    for (const [c, active] of columnActive) {
+      if (!active) continue;
+      byGroup[c] = rankOf(
+        row.byGroup[c],
+        rows.map((r) => r.byGroup[c]),
+      );
+    }
+    const total = totalActive
+      ? rankOf(
+          row.total,
+          rows.map((r) => r.total),
+        )
+      : 0;
+    return { rosterId: row.rosterId, name: row.name, byGroup, total };
   });
 }
 

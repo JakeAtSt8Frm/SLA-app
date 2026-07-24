@@ -9,12 +9,10 @@
 
 import { useMemo, useState } from 'react';
 import { useLeague, useLeagueData } from '../data/LeagueProvider';
-import { buildHeatmap, buildRosterWeek } from '../data/selectors';
+import { buildHeatmap, buildRankHeatmap, buildRosterWeek } from '../data/selectors';
 import { PlayerRow } from '../components/PlayerRow';
 import { PlayerModal } from '../components/PlayerModal';
 import { Heatmap } from '../components/Heatmap';
-import { useTheme } from '../components/ThemeProvider';
-import { rygColor } from '../lib/colors';
 import {
   EmptyState,
   PlacementBadge,
@@ -23,9 +21,8 @@ import {
   fmt1,
   fmtPct,
 } from '../components/primitives';
-import { POSITION_GROUPS } from '../lib/types';
-import type { EnrichedPlayer, PositionGroup } from '../lib/types';
-import type { HeatmapMetric, HeatmapRow, HeatmapScope } from '../data/selectors';
+import type { EnrichedPlayer } from '../lib/types';
+import type { HeatmapMetric, HeatmapScope } from '../data/selectors';
 
 /** Display order and labels for starter slot groups. */
 const SLOT_GROUPS: Array<{ key: string; label: string; slots: string[] }> = [
@@ -48,7 +45,6 @@ const SLOT_GROUPS: Array<{ key: string; label: string; slots: string[] }> = [
 export function TeamsPage() {
   const data = useLeagueData();
   const { week, selectedRosterId, setSelectedRosterId } = useLeague();
-  const { mode } = useTheme();
   const [openPid, setOpenPid] = useState<string | null>(null);
   const [scope, setScope] = useState<HeatmapScope>('starters');
   const [metric, setMetric] = useState<HeatmapMetric>('actual');
@@ -60,35 +56,14 @@ export function TeamsPage() {
     [data, rosterId, week],
   );
 
-  // How this team's starters rank league-wide for the selected week's points,
-  // overall and by position — matching the week-scoped heatmap beside it. Each
-  // row carries a rank (for colour) and a share of the league leader (for the
-  // bar length), mirroring the Analytics power list. Starters only, always.
-  const starterScoring = useMemo(
-    () => buildHeatmap(data, week, 'starters', 'actual'),
-    [data, week],
-  );
-  const starterRank = useMemo(() => {
-    if (rosterId === null) return null;
-    const outOf = starterScoring.length;
-    const build = (pick: (r: HeatmapRow) => number) => {
-      const values = starterScoring.map((r) => ({ rosterId: r.rosterId, v: pick(r) }));
-      const max = Math.max(1, ...values.map((x) => x.v));
-      const rank =
-        [...values].sort((a, b) => b.v - a.v).findIndex((x) => x.rosterId === rosterId) + 1;
-      const mine = values.find((x) => x.rosterId === rosterId)?.v ?? 0;
-      return { rank, pct: (mine / max) * 100 };
-    };
-    const byGroup = Object.fromEntries(
-      POSITION_GROUPS.map((group) => [group, build((r) => r.byGroup[group])]),
-    ) as Record<PositionGroup, { rank: number; pct: number }>;
-    return { outOf, overall: build((r) => r.total), byGroup };
-  }, [starterScoring, rosterId]);
-
   const heatmapRows = useMemo(
     () => buildHeatmap(data, week, scope, metric),
     [data, week, scope, metric],
   );
+
+  // The rank grid is derived from the points grid, so it follows the same
+  // scope/metric and always agrees with the numbers above it.
+  const rankRows = useMemo(() => buildRankHeatmap(heatmapRows), [heatmapRows]);
 
   const grouped = useMemo(() => {
     if (!rosterWeek) return [];
@@ -228,8 +203,16 @@ export function TeamsPage() {
           </div>
 
           <Heatmap
-            title={`${metric === 'actual' ? 'Actual' : 'Projected'} points by position — week ${week}`}
+            title="Weekly Points Per Position"
             rows={heatmapRows}
+            selectedRosterId={rosterId}
+            onSelectTeam={setSelectedRosterId}
+          />
+
+          <Heatmap
+            title="Weekly Rank Per Position"
+            variant="rank"
+            rows={rankRows}
             selectedRosterId={rosterId}
             onSelectTeam={setSelectedRosterId}
           />
@@ -238,13 +221,6 @@ export function TeamsPage() {
             <div className="section-title">Status breakdown</div>
             <StatusSummary players={starters} />
           </div>
-
-          {starterRank && (
-            <div className="card card-pad">
-              <div className="section-title">Scoring rank by position</div>
-              <PositionScoringRank rank={starterRank} mode={mode} />
-            </div>
-          )}
         </div>
       </div>
 
@@ -255,70 +231,6 @@ export function TeamsPage() {
 
 function sum<T>(items: T[], pick: (item: T) => number): number {
   return Math.round(items.reduce((s, i) => s + pick(i), 0) * 100) / 100;
-}
-
-/** 1 -> "1st", 2 -> "2nd", ... */
-function ordinal(n: number): string {
-  const mod100 = n % 100;
-  if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
-  const suffix = ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th';
-  return `${n}${suffix}`;
-}
-
-/**
- * Where a team's starters rank league-wide for points scored — overall and by
- * position — drawn as the same bar list the Analytics power ranking uses. The
- * bar length is the team's scoring as a share of the league leader; its colour
- * runs the app's red→yellow→green scale by rank (first green, last red), and the
- * ordinal on the right is the non-colour channel so the ranking is legible
- * without hue.
- */
-function PositionScoringRank({
-  rank,
-  mode,
-}: {
-  rank: {
-    outOf: number;
-    overall: { rank: number; pct: number };
-    byGroup: Record<PositionGroup, { rank: number; pct: number }>;
-  };
-  mode: 'light' | 'dark';
-}) {
-  const outOf = rank.outOf;
-  const rows = [
-    { key: 'ALL', label: 'Overall', ...rank.overall },
-    ...POSITION_GROUPS.map((group) => ({ key: group, label: group, ...rank.byGroup[group] })),
-  ];
-
-  return (
-    <div className="power-list power-list--compact">
-      {rows.map((row) => {
-        const t = outOf > 1 ? 1 - (row.rank - 1) / (outOf - 1) : 1;
-        const color = rygColor(t, mode);
-        return (
-          <div key={row.key} className="power-row power-row--compact">
-            <span className="power-team">{row.label}</span>
-            <span
-              className="power-track"
-              role="meter"
-              aria-label={`${row.label} scoring rank`}
-              aria-valuemin={1}
-              aria-valuemax={outOf}
-              aria-valuenow={row.rank}
-            >
-              <span
-                className="power-fill"
-                style={{ width: `${Math.max(row.pct, 3)}%`, background: color }}
-              />
-            </span>
-            <span className="power-value mono bold" title={`${ordinal(row.rank)} of ${outOf}`}>
-              {ordinal(row.rank)}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
 }
 
 /** Counts of each boom/bust classification across a lineup. */

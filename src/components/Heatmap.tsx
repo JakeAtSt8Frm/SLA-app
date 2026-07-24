@@ -1,54 +1,84 @@
 /**
- * Positional heatmap: teams down the side, position groups across the top.
+ * Positional heatmap: teams down the side, positions across the top.
  *
- * Colour encodes each cell's standing *within its own column*, diverging around
- * the league median — so a cell reads as "strong / typical / weak at this
- * position relative to the rest of the league", which is the actual question.
- * Normalising per column matters because the groups aren't comparable in raw
+ * In the default `points` variant, colour encodes each cell's standing *within
+ * its own column*, diverging around the league median — so a cell reads as
+ * "strong / typical / weak at this position relative to the rest of the league".
+ * Normalising per column matters because the columns aren't comparable in raw
  * points: in this league a starting LB corps routinely outscores the QB slot.
  *
- * Every cell also prints its number, so the colour reinforces the value rather
- * than being the only way to read it.
+ * In the `rank` variant the cell already *is* a rank (1 = best that week), so
+ * colour maps straight from rank — first green, last red — and the cell prints
+ * the ordinal. Either way the number carries the value, with colour reinforcing.
  */
 
 import { useMemo, useState } from 'react';
 import { useTheme } from './ThemeProvider';
 import { divergingPosition, heatmapCell } from '../lib/colors';
-import { HEATMAP_GROUPS, type HeatmapRow } from '../data/selectors';
-import type { PositionGroup } from '../lib/types';
+import { HEATMAP_COLUMNS, type HeatmapColumn, type HeatmapRow } from '../data/selectors';
 
 interface Props {
   title: string;
   rows: HeatmapRow[];
+  /** 'points' shows scores; 'rank' shows each team's 1..N rank per column. */
+  variant?: 'points' | 'rank';
   /** Highlights this team's row. */
   selectedRosterId?: number | null;
   onSelectTeam?: (rosterId: number) => void;
 }
 
-export function Heatmap({ title, rows, selectedRosterId, onSelectTeam }: Props) {
+/** 1 -> "1st", 2 -> "2nd", ... */
+function ordinal(n: number): string {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
+  const suffix = ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th';
+  return `${n}${suffix}`;
+}
+
+export function Heatmap({
+  title,
+  rows,
+  variant = 'points',
+  selectedRosterId,
+  onSelectTeam,
+}: Props) {
   const { mode } = useTheme();
   const [showTable, setShowTable] = useState(false);
+  const isRank = variant === 'rank';
 
-  // Per-column value lists drive the diverging normalisation.
+  // Per-column value lists drive the points variant's diverging normalisation.
   const columns = useMemo(() => {
-    const byGroup = new Map<PositionGroup, number[]>();
-    for (const g of HEATMAP_GROUPS) {
+    const byGroup = new Map<HeatmapColumn, number[]>();
+    for (const c of HEATMAP_COLUMNS) {
       byGroup.set(
-        g,
-        rows.map((r) => r.byGroup[g]),
+        c,
+        rows.map((r) => r.byGroup[c]),
       );
     }
     return { byGroup, totals: rows.map((r) => r.total) };
   }, [rows]);
 
-  // Groups nobody scored in are hidden — with a 6-team league, an empty column
+  // Columns nobody scored in are hidden — with a 6-team league, an empty column
   // is noise rather than information.
-  const activeGroups = useMemo(
-    () => HEATMAP_GROUPS.filter((g) => columns.byGroup.get(g)!.some((v) => v !== 0)),
+  const activeColumns = useMemo(
+    () => HEATMAP_COLUMNS.filter((c) => columns.byGroup.get(c)!.some((v) => v !== 0)),
     [columns],
   );
 
   if (!rows.length) return null;
+
+  // Rank colour runs straight from the rank: 1 = best (green), N = worst (red).
+  const colorFor = (value: number, column: number[], isSelected: boolean) => {
+    if (showTable) return null;
+    const t = isRank
+      ? rows.length > 1
+        ? (rows.length - value) / (rows.length - 1)
+        : 0.5
+      : divergingPosition(value, column);
+    return heatmapCell(t, mode, isSelected);
+  };
+
+  const display = (value: number) => (isRank ? ordinal(value) : value.toFixed(1));
 
   return (
     <figure className="card" style={{ margin: 0, overflow: 'hidden' }}>
@@ -69,16 +99,16 @@ export function Heatmap({ title, rows, selectedRosterId, onSelectTeam }: Props) 
         <table className="heatmap" aria-label={title}>
           <colgroup>
             <col className="heatmap__team-col" />
-            <col span={activeGroups.length + 1} />
+            <col span={activeColumns.length + 1} />
           </colgroup>
           <thead>
             <tr>
               <th scope="col" className="heatmap__team-head">
                 Team
               </th>
-              {activeGroups.map((g) => (
-                <th key={g} scope="col">
-                  {g}
+              {activeColumns.map((c) => (
+                <th key={c} scope="col">
+                  {c}
                 </th>
               ))}
               <th scope="col">Total</th>
@@ -100,45 +130,34 @@ export function Heatmap({ title, rows, selectedRosterId, onSelectTeam }: Props) 
                     </button>
                   </th>
 
-                  {activeGroups.map((g) => {
-                    const v = row.byGroup[g];
-                    const column = columns.byGroup.get(g)!;
-                    const cell = showTable
-                      ? null
-                      : heatmapCell(divergingPosition(v, column), mode, isSelected);
+                  {activeColumns.map((c) => {
+                    const v = row.byGroup[c];
+                    const cell = colorFor(v, columns.byGroup.get(c)!, isSelected);
                     return (
                       <td
-                        key={g}
+                        key={c}
                         className="mono"
                         style={
-                          cell
-                            ? { background: cell.background, color: cell.ink }
-                            : undefined
+                          cell ? { background: cell.background, color: cell.ink } : undefined
                         }
-                        title={`${row.name} — ${g}: ${v.toFixed(2)}`}
+                        title={`${row.name} — ${c}: ${display(v)}`}
                       >
-                        {v.toFixed(1)}
+                        {display(v)}
                       </td>
                     );
                   })}
 
                   {(() => {
-                    const cell = showTable
-                      ? null
-                      : heatmapCell(
-                          divergingPosition(row.total, columns.totals),
-                          mode,
-                          isSelected,
-                        );
+                    const cell = colorFor(row.total, columns.totals, isSelected);
                     return (
                       <td
                         className="mono bold"
                         style={
                           cell ? { background: cell.background, color: cell.ink } : undefined
                         }
-                        title={`${row.name} — total: ${row.total.toFixed(2)}`}
+                        title={`${row.name} — total: ${display(row.total)}`}
                       >
-                        {row.total.toFixed(1)}
+                        {display(row.total)}
                       </td>
                     );
                   })()}
@@ -151,14 +170,14 @@ export function Heatmap({ title, rows, selectedRosterId, onSelectTeam }: Props) 
 
       {!showTable && (
         <div className="heatmap__legend">
-          <span className="tiny muted">Below league</span>
+          <span className="tiny muted">{isRank ? 'Last' : 'Below league'}</span>
           <span className="heatmap__ramp" aria-hidden="true">
             {Array.from({ length: 9 }, (_, i) => {
               const { background } = heatmapCell(i / 8, mode);
               return <i key={i} style={{ background }} />;
             })}
           </span>
-          <span className="tiny muted">Above league</span>
+          <span className="tiny muted">{isRank ? '1st' : 'Above league'}</span>
         </div>
       )}
     </figure>
