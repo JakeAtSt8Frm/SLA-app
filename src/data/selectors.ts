@@ -226,10 +226,10 @@ function sortByImpact(a: EnrichedPlayer, b: EnrichedPlayer): number {
 export type HeatmapColumn = PositionGroup | 'SF';
 export const HEATMAP_COLUMNS: HeatmapColumn[] = [
   'QB',
-  'SF',
   'RB',
   'WR',
   'TE',
+  'SF',
   'K',
   'DL',
   'LB',

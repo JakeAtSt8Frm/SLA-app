@@ -42,6 +42,17 @@ export interface WeekPoint {
   optimal?: number;
 }
 
+export interface TeamRankSeries {
+  rosterId: number;
+  dataKey: string;
+  name: string;
+  color: string;
+}
+
+export type TeamRankPoint = {
+  week: string;
+} & Record<string, string | number | null>;
+
 /** Weekly projected vs actual (and optionally optimal) custom score. */
 export function WeeklyScoreChart({
   data,
@@ -99,6 +110,83 @@ export function WeeklyScoreChart({
           )}
         </LineChart>
       </ResponsiveContainer>
+    </div>
+  );
+}
+
+/** Each team's scoring rank for every week, with first place at the top. */
+export function WeeklyTeamRankChart({
+  data,
+  teams,
+  height = 280,
+}: {
+  data: TeamRankPoint[];
+  teams: TeamRankSeries[];
+  height?: number;
+}) {
+  const ticks = Array.from({ length: teams.length }, (_, index) => index + 1);
+
+  return (
+    <div className="rank-chart">
+      <div className="rank-chart__legend" aria-label="Team colors">
+        {teams.map((team) => (
+          <span key={team.rosterId} className="rank-chart__legend-item">
+            <i
+              className="rank-chart__legend-dot"
+              style={{ background: team.color }}
+              aria-hidden="true"
+            />
+            {team.name}
+          </span>
+        ))}
+      </div>
+      <div style={{ width: '100%', height }}>
+        <ResponsiveContainer>
+          <LineChart data={data} margin={{ top: 8, right: 10, left: -12, bottom: 0 }}>
+            <CartesianGrid stroke="var(--grid)" vertical={false} />
+            <XAxis
+              dataKey="week"
+              {...AXIS}
+              axisLine={{ stroke: 'var(--border-strong)' }}
+              minTickGap={18}
+            />
+            <YAxis
+              {...AXIS}
+              axisLine={false}
+              width={42}
+              domain={[1, Math.max(1, teams.length)]}
+              ticks={ticks}
+              reversed
+              allowDecimals={false}
+              tickFormatter={(value) => `#${value}`}
+            />
+            <Tooltip
+              contentStyle={TOOLTIP_STYLE}
+              labelStyle={{ color: 'var(--text-primary)', fontWeight: 700 }}
+              formatter={(value, name) => [
+                typeof value === 'number' ? `#${value}` : '—',
+                String(name),
+              ]}
+              itemSorter={(item) =>
+                typeof item.value === 'number' ? item.value : Number.MAX_SAFE_INTEGER
+              }
+            />
+            {teams.map((team) => (
+              <Line
+                key={team.rosterId}
+                type="linear"
+                dataKey={team.dataKey}
+                name={team.name}
+                stroke={team.color}
+                strokeWidth={2}
+                dot={{ r: 3, fill: team.color }}
+                activeDot={{ r: 5 }}
+                connectNulls
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }

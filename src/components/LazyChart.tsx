@@ -7,7 +7,7 @@
  */
 
 import { lazy, Suspense } from 'react';
-import type { WeekPoint } from './charts';
+import type { TeamRankPoint, TeamRankSeries, WeekPoint } from './charts';
 
 const WeeklyScoreChart = lazy(() =>
   import('./charts').then((m) => ({ default: m.WeeklyScoreChart })),
@@ -15,6 +15,10 @@ const WeeklyScoreChart = lazy(() =>
 
 const WeeklyBarChart = lazy(() =>
   import('./charts').then((m) => ({ default: m.WeeklyBarChart })),
+);
+
+const WeeklyTeamRankChart = lazy(() =>
+  import('./charts').then((m) => ({ default: m.WeeklyTeamRankChart })),
 );
 
 function ChartFallback({ height }: { height: number }) {
@@ -62,4 +66,17 @@ export function LazyWeeklyBarChart(props: {
   );
 }
 
-export type { WeekPoint };
+export function LazyWeeklyTeamRankChart(props: {
+  data: TeamRankPoint[];
+  teams: TeamRankSeries[];
+  height?: number;
+}) {
+  const height = props.height ?? 280;
+  return (
+    <Suspense fallback={<ChartFallback height={height} />}>
+      <WeeklyTeamRankChart {...props} />
+    </Suspense>
+  );
+}
+
+export type { TeamRankPoint, TeamRankSeries, WeekPoint };

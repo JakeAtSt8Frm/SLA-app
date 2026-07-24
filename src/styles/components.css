@@ -579,7 +579,7 @@
   font-size: 11px;
   /* Breathing room on both ends so the Total column doesn't sit flush against
      the card edge, and so the first column clears the sticky team names. */
-  padding: 0 8px 2px 0;
+  padding: 0 8px 2px;
 }
 
 .heatmap th {
@@ -602,6 +602,7 @@
   text-align: left !important;
   position: sticky;
   left: 0;
+  padding-left: 8px !important;
   background: var(--surface);
   z-index: 1;
 }
@@ -916,6 +917,41 @@
   font-size: 12px;
 }
 
+.power-trend {
+  border-top: 1px solid var(--border);
+}
+
+.power-trend__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.rank-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-bottom: 8px;
+}
+
+.rank-chart__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.rank-chart__legend-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
 @media (max-width: 560px) {
   .power-row {
     grid-template-columns: 22px minmax(0, 1fr) 48px;
@@ -925,6 +961,20 @@
   .power-track {
     grid-column: 2 / -1;
     height: 10px;
+  }
+
+  .power-trend {
+    padding-inline: 10px;
+  }
+
+  .power-trend__head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .rank-chart__legend {
+    gap: 7px 10px;
   }
 }
 

@@ -16,6 +16,7 @@ import {
   fmtPct,
   fmtSigned,
 } from '../components/primitives';
+import { LazyWeeklyTeamRankChart } from '../components/LazyChart';
 import { useTheme } from '../components/ThemeProvider';
 import { teamColor } from '../lib/colors';
 import { mean, quantile, round, stdev, topWeightedMean } from '../lib/stats';
@@ -207,6 +208,39 @@ export function AnalyticsPage() {
       }))
       .sort((a, b) => b.powerIndex - a.powerIndex);
   }, [powerScope, standings, rosterValues]);
+
+  const weeklyRanks = useMemo(() => {
+    const teams = power.map((team) => ({
+      rosterId: team.rosterId,
+      dataKey: `team_${team.rosterId}`,
+      name: team.name,
+      color: teamColor(team.rosterId, mode),
+    }));
+
+    const points = Array.from({ length: data.currentWeek }, (_, index) => {
+      const week = index + 1;
+      const scores = standings
+        .map((team) => ({
+          rosterId: team.rosterId,
+          score: team.weekly.find((row) => row.week === week)?.actual,
+        }))
+        .filter(
+          (row): row is { rosterId: number; score: number } => row.score !== undefined,
+        );
+
+      const point: { week: string } & Record<string, string | number | null> = {
+        week: `W${week}`,
+      };
+      for (const team of teams) {
+        const score = scores.find((row) => row.rosterId === team.rosterId)?.score;
+        point[team.dataKey] =
+          score === undefined ? null : 1 + scores.filter((row) => row.score > score).length;
+      }
+      return point;
+    });
+
+    return { teams, points };
+  }, [data.currentWeek, mode, power, standings]);
 
   const defenses = useMemo(() => {
     const entries = data.matchupIndex.byGroup.get(muGroup);
@@ -414,6 +448,17 @@ export function AnalyticsPage() {
                 </div>
               );
             })}
+          </div>
+          <div className="card-pad power-trend">
+            <div className="power-trend__head">
+              <span className="bold">Weekly scoring rank</span>
+              <span className="tiny muted">1st is best · ties share a rank</span>
+            </div>
+            <LazyWeeklyTeamRankChart
+              data={weeklyRanks.points}
+              teams={weeklyRanks.teams}
+              height={280}
+            />
           </div>
         </section>
 
