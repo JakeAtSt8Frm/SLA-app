@@ -352,12 +352,6 @@ export function AnalyticsPage() {
               : `${powerScope} power weights the player Value Scores of the ${powerScope}s a team rosters toward its best ones, so a deep group is not dragged down by a single low-value player. The bar is scaled so the strongest reads 100.`}
           </p>
           <div className="card-pad power-controls">
-            {powerScope !== 'ALL' && (
-              <p className="small muted" style={{ margin: '0 0 10px' }}>
-                Weighted toward your best {powerScope}s — depth counts, one low scrub
-                doesn't drag you down.
-              </p>
-            )}
             <div className="segmented" role="group" aria-label="Power ranking scope">
               <button
                 aria-pressed={powerScope === 'ALL'}

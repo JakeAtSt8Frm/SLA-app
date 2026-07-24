@@ -68,10 +68,23 @@
   font-variant-emoji: text;
 }
 
+/*
+ * The refresh arrow (⟳) is a lighter, smaller glyph than the gear (⚙), so at a
+ * shared font-size it reads as the runt of the row. Bump it on its own so the
+ * two icons look the same size.
+ */
+.topbar__icon--refresh {
+  font-size: 19px;
+}
+
 @media (max-width: 760px) {
   .topbar__icon {
     font-size: 19px;
     min-width: 40px;
+  }
+
+  .topbar__icon--refresh {
+    font-size: 22px;
   }
 }
 

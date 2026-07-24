@@ -7,7 +7,6 @@
 import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useLeague } from '../data/LeagueProvider';
-import { useTheme } from './ThemeProvider';
 import { SEASONS } from '../data/league';
 import { Spinner } from './primitives';
 import { SettingsMenu } from './SettingsMenu';
@@ -42,7 +41,6 @@ export function AppShell() {
     setWeek,
     refresh,
   } = useLeague();
-  const { mode, toggle } = useTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const headerHidden = useHideOnScroll();
 
@@ -98,16 +96,7 @@ export function AppShell() {
             )}
 
             <button
-              className="btn btn-ghost btn-sm topbar__icon"
-              onClick={toggle}
-              aria-label={`Switch to ${mode === 'dark' ? 'light' : 'dark'} theme`}
-              title={`Switch to ${mode === 'dark' ? 'light' : 'dark'} theme`}
-            >
-              {mode === 'dark' ? '☀' : '☾'}
-            </button>
-
-            <button
-              className="btn btn-ghost btn-sm topbar__icon"
+              className="btn btn-ghost btn-sm topbar__icon topbar__icon--refresh"
               onClick={refresh}
               aria-label="Refresh data"
               title="Clear cache and reload"
