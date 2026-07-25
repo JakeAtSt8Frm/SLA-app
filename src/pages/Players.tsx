@@ -16,7 +16,7 @@ import { EmptyState } from '../components/primitives';
 import { POSITION_GROUPS, type PositionGroup } from '../lib/types';
 
 type Availability = 'free' | 'rostered' | 'all';
-type SortKey = 'value' | 'ppg' | 'total' | 'last4';
+type SortKey = 'value' | 'ppg' | 'total' | 'last4' | 'boomRate';
 
 export function PlayersPage() {
   const data = useLeagueData();
@@ -69,7 +69,9 @@ export function PlayersPage() {
             ? b.ppg
             : sort === 'total'
               ? b.total
-              : b.last4;
+              : sort === 'last4'
+                ? b.last4
+                : b.boomRate;
 
       rows.push({ pid, sortValue });
     }
@@ -127,6 +129,9 @@ export function PlayersPage() {
           </button>
           <button aria-pressed={sort === 'last4'} onClick={() => setSort('last4')}>
             Last 4
+          </button>
+          <button aria-pressed={sort === 'boomRate'} onClick={() => setSort('boomRate')}>
+            Boom Rate
           </button>
         </div>
       </div>
