@@ -48,6 +48,9 @@ export const CURRENT_SEASON_WEIGHT = 0.8;
  * Production dominates but does not swamp; age carries real weight because this
  * is a forward-looking model; market is a meaningful but minority voice so the
  * score stays an *intrinsic* opinion the market can be measured against.
+ *
+ * Historical holdout evidence and the limits of the observable-data proxy are
+ * documented in `docs/dynasty-value-research.md`.
  */
 export const DYNASTY_WEIGHTS = {
   production: 0.4,
