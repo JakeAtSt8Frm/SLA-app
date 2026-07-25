@@ -13,9 +13,10 @@ import { useEffect, useMemo, useRef } from 'react';
 import { LazyWeeklyScoreChart } from './LazyChart';
 import { useLeagueData } from '../data/LeagueProvider';
 import { playerHeadshot, teamLogo } from '../lib/sleeper';
-import { fmt1, fmtPct, StatusBadge, ValueChip } from './primitives';
+import { fmt1, fmtPct, fmtSigned, StatusBadge, ValueChip } from './primitives';
 import { enrichPlayer } from '../data/selectors';
 import { VALUE_WEIGHTS } from '../lib/value';
+import { DYNASTY_WEIGHTS } from '../lib/dynasty';
 
 interface Props {
   pid: string | null;
@@ -51,6 +52,7 @@ export function PlayerModal({ pid, week, onClose }: Props) {
 
     const player = enrichPlayer(data, pid, week, '', false);
     const value = data.valueIndex.byPlayer.get(pid) ?? null;
+    const dynasty = data.dynastyIndex.byPlayer.get(pid) ?? null;
     const weekly = data.valueIndex.weeklyScores.get(pid) ?? [];
     const matchup = data.matchupIndex.get(player.group, player.opponent, player.team);
 
@@ -60,12 +62,12 @@ export function PlayerModal({ pid, week, onClose }: Props) {
       actual: w.actual,
     }));
 
-    return { player, value, weekly, matchup, chart };
+    return { player, value, dynasty, weekly, matchup, chart };
   }, [data, pid, week]);
 
   if (!pid || !detail) return null;
 
-  const { player: p, value, weekly, matchup, chart } = detail;
+  const { player: p, value, dynasty, weekly, matchup, chart } = detail;
 
   const played = weekly.length;
   const beats = weekly.filter((w) => w.projected !== null && w.actual > w.projected).length;
@@ -127,6 +129,12 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                 </span>
               )}
             </div>
+            {value && dynasty && (
+              <div className="tiny muted" style={{ marginTop: 4 }}>
+                Value {p.valueScore} = average of in-season form {value.score} and dynasty{' '}
+                {dynasty.score}
+              </div>
+            )}
           </div>
           <button className="btn btn-ghost btn-sm" onClick={onClose} aria-label="Close">
             ✕
@@ -221,6 +229,117 @@ export function PlayerModal({ pid, week, onClose }: Props) {
             </section>
           )}
 
+
+          {/* ---- Dynasty profile ---- */}
+          {dynasty && (
+            <section>
+              <h3 className="section-title">Dynasty {dynasty.score}</h3>
+              <div
+                className="row wrap"
+                style={{ gap: 6, marginBottom: 8, alignItems: 'center' }}
+              >
+                <span className="chip chip-outline">{dynasty.breakdown.tier}</span>
+                <VerdictChip verdict={dynasty.breakdown.verdict} />
+                <span className="chip chip-outline">Market: {dynasty.breakdown.marketTrend}</span>
+                <span className="chip chip-outline">Liquidity: {dynasty.breakdown.liquidity}</span>
+                <span className="chip chip-outline">Injury: {dynasty.breakdown.injuryRisk}</span>
+              </div>
+              <div className="metric-grid">
+                <Metric
+                  label="Contender"
+                  value={String(dynasty.breakdown.contenderScore)}
+                  sub="win-now lens"
+                />
+                <Metric
+                  label="Rebuilder"
+                  value={String(dynasty.breakdown.rebuilderScore)}
+                  sub="long-term lens"
+                />
+                {dynasty.breakdown.vorp !== null && (
+                  <Metric
+                    label="VORP"
+                    value={fmtSigned(dynasty.breakdown.vorp)}
+                    sub="pts over replacement"
+                  />
+                )}
+                {dynasty.breakdown.blendedPpg !== null && (
+                  <Metric
+                    label="Blended PPG"
+                    value={fmt1(dynasty.breakdown.blendedPpg)}
+                    sub="80% now / 20% prior"
+                  />
+                )}
+                {dynasty.breakdown.currentPpg !== null && (
+                  <Metric label="This year PPG" value={fmt1(dynasty.breakdown.currentPpg)} />
+                )}
+                {dynasty.breakdown.priorPpg !== null && (
+                  <Metric
+                    label="Prior 2yr PPG"
+                    value={fmt1(dynasty.breakdown.priorPpg)}
+                  />
+                )}
+                <Metric
+                  label="Replacement PPG"
+                  value={fmt1(dynasty.breakdown.replacementPpg)}
+                  sub={`${dynasty.group} starter cliff`}
+                />
+                {dynasty.breakdown.age !== null && (
+                  <Metric label="Age" value={String(dynasty.breakdown.age)} />
+                )}
+                {dynasty.breakdown.marketValue !== null && (
+                  <Metric
+                    label="Market value"
+                    value={String(dynasty.breakdown.marketValue)}
+                    sub={
+                      dynasty.breakdown.marketOverallRank
+                        ? `#${dynasty.breakdown.marketOverallRank} overall`
+                        : undefined
+                    }
+                  />
+                )}
+                {dynasty.breakdown.marketPositionRank !== null && (
+                  <Metric
+                    label="Market pos rank"
+                    value={`${dynasty.group} #${dynasty.breakdown.marketPositionRank}`}
+                  />
+                )}
+              </div>
+
+              <h3 className="section-title" style={{ marginTop: 14 }}>
+                Why Dynasty {dynasty.score}
+              </h3>
+              <div className="small muted" style={{ marginBottom: 8 }}>
+                Multi-year VORP and market are ranked across all positions; role and
+                efficiency within {dynasty.group}. Missing market (e.g. IDP) reads neutral.
+              </div>
+              <div className="scroll-x">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Signal</th>
+                      <th className="num">Weight</th>
+                      <th className="num">Percentile</th>
+                      <th className="num">Contribution</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...dynasty.breakdown.contributions]
+                      .sort((a, b) => b.points - a.points)
+                      .map((c) => (
+                        <tr key={c.label}>
+                          <td>{c.label}</td>
+                          <td className="num muted">
+                            {((c.weight / dynastyTotalWeight) * 100).toFixed(0)}%
+                          </td>
+                          <td className="num">{fmtPct(c.normalized)}</td>
+                          <td className="num bold">{(c.points * 1000).toFixed(0)}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
 
           {/* ---- This week's matchup ---- */}
           {matchup && (
@@ -368,6 +487,34 @@ export function PlayerModal({ pid, week, onClose }: Props) {
 }
 
 const totalWeight = Object.values(VALUE_WEIGHTS).reduce((a, b) => a + b, 0);
+const dynastyTotalWeight = Object.values(DYNASTY_WEIGHTS).reduce((a, b) => a + b, 0);
+
+/** Buy/Sell/Fair marker for the gap between intrinsic value and market price. */
+function VerdictChip({ verdict }: { verdict: string }) {
+  const tone =
+    verdict === 'Buy'
+      ? 'var(--success-text)'
+      : verdict === 'Sell'
+        ? 'var(--danger-text)'
+        : 'var(--text-muted)';
+  const label =
+    verdict === 'Buy'
+      ? 'Buy low'
+      : verdict === 'Sell'
+        ? 'Sell high'
+        : verdict === 'Fair'
+          ? 'Fairly valued'
+          : 'No market';
+  return (
+    <span
+      className="chip"
+      style={{ color: tone, background: `color-mix(in srgb, ${tone} 14%, transparent)` }}
+      title="Intrinsic dynasty value vs current market price"
+    >
+      {label}
+    </span>
+  );
+}
 
 function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (

@@ -45,13 +45,36 @@ points.
 
 **Custom score** — `scoring_settings` × raw stat keys. Exact, verified above.
 
-**Value Score (0–1000)** — a season-long valuation blending 11 normalised
-signals, each a percentile *within the player's own position group*. The model
-prioritises PPG (.22), exponentially weighted form (.16), the current projection
-(.14), recent team opportunity share (.12), recent snap share (.11), last-four
-production (.08) and schedule-adjusted PPG (.07). Usage, floor, availability and
-efficiency provide the remaining .10. Age and popularity are excluded: this is
-an in-season performance model, not a dynasty or consensus ranking.
+**Value Score (0–1000)** — the headline number, the **average of two
+within-position valuations**: an in-season half and a dynasty half. Every signal
+in both is a percentile *within the player's own position group*, which is what
+lets the two be averaged and read the same way — "top of his own pool", not
+comparable across positions.
+
+- *In-season half* blends 11 signals, prioritising PPG (.22), exponentially
+  weighted form (.16), the current projection (.14), recent team opportunity
+  share (.12), recent snap share (.11), last-four production (.08) and
+  schedule-adjusted PPG (.07); usage, floor, availability and efficiency provide
+  the rest. This half is age- and market-blind: pure "producing now".
+
+- *Dynasty half* answers "what should this player be worth to hold". Its lead
+  signal is multi-year **VORP** — production blended 80% the current season and
+  20% the prior two (scored in *this* league's format), minus the group's real
+  replacement level from the league's actual superflex/IDP starting
+  requirements. On top of it: a position-specific age/longevity curve, role and
+  usage, value insulation, efficiency, availability, and — the one thing Sleeper
+  can't provide — the current trade market from
+  [FantasyCalc](https://fantasycalc.com) (superflex- and size-matched, keyed by
+  Sleeper id). The gap between the intrinsic dynasty score and the market price
+  surfaces in the player sheet as a **Buy-low / Sell-high / Fair** verdict,
+  alongside contender- and rebuilder-lens scores. FantasyCalc doesn't price
+  IDPs, so DL/LB/DB fall back to a production-only dynasty valuation with a
+  neutral market leg.
+
+Both halves show their own "why" breakdown in the player sheet. Every dynasty
+input is best-effort: a failed market or prior-season fetch degrades that half
+gracefully rather than blocking the app, and a player with only one half carries
+that half as his Value Score.
 
 **Matchup Score (0–100)** — a contextual next-week rating. It combines the
 defence-only generosity model (.35), opponent-adjusted concessions (.15),

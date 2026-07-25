@@ -63,7 +63,13 @@ export function PlayersPage() {
 
       const b = value.breakdown;
       const sortValue =
-        sort === 'value' ? value.score : sort === 'ppg' ? b.ppg : sort === 'total' ? b.total : b.last4;
+        sort === 'value'
+          ? (data.combinedScores.get(pid) ?? value.score)
+          : sort === 'ppg'
+            ? b.ppg
+            : sort === 'total'
+              ? b.total
+              : b.last4;
 
       rows.push({ pid, sortValue });
     }

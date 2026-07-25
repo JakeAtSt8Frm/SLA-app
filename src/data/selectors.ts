@@ -85,7 +85,8 @@ export function enrichPlayer(
      */
     isOut: isOut(player) && !played,
     seasonTotal: data.valueIndex.seasonTotals.get(pid) ?? 0,
-    valueScore: data.valueIndex.byPlayer.get(pid)?.score ?? null,
+    // The headline Value Score is the blended in-season + dynasty number.
+    valueScore: data.combinedScores.get(pid) ?? data.valueIndex.byPlayer.get(pid)?.score ?? null,
     matchupScore,
     ppgRank: data.valueIndex.ppgRanks.get(pid) ?? null,
     totalRank: data.valueIndex.totalRanks.get(pid) ?? null,

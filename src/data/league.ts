@@ -20,8 +20,16 @@ import {
   getWeekStats,
   getWinnersBracket,
 } from '../lib/sleeper';
-import { compileScoring, createScorer, groupForPlayer, type ScoringModel } from '../lib/scoring';
+import {
+  compileScoring,
+  createScorer,
+  groupForPlayer,
+  hasPlayed,
+  type ScoringModel,
+} from '../lib/scoring';
 import { buildValueIndex, type ValueIndex } from '../lib/value';
+import { buildDynastyIndex, type DynastyIndex, type SeasonPpg } from '../lib/dynasty';
+import { getMarketValues, marketQueryFromLeague } from '../lib/market';
 import { buildMatchupIndex, type MatchupIndex } from '../lib/matchup';
 import { starterSlots } from '../lib/optimal';
 import type {
@@ -125,6 +133,14 @@ export interface LeagueData {
   maxWeek: number;
   starterSlots: string[];
   valueIndex: ValueIndex;
+  dynastyIndex: DynastyIndex;
+  /**
+   * The single headline Value Score shown across the app: the average of the
+   * in-season Value Score and the dynasty score, both percentiled within
+   * position so the two are on the same footing. Falls back to whichever exists
+   * when a player carries only one.
+   */
+  combinedScores: Map<string, number>;
   matchupIndex: MatchupIndex;
 }
 
@@ -182,6 +198,47 @@ async function mapLimit<T, R>(
 
   await Promise.all(workers);
   return results;
+}
+
+/**
+ * Blended per-player PPG for a single past season, scored in the *current*
+ * league's format so the multi-year dynasty blend compares like with like.
+ *
+ * Stats are NFL-wide and league-independent, so this needs only the year — no
+ * league id — which is what lets the dynasty model reach back past the seasons
+ * that happen to be configured in `SEASON_LEAGUES`. Every fetch is best-effort;
+ * a missing week simply doesn't contribute.
+ */
+async function loadSeasonPpg(
+  season: string,
+  scoringModel: ScoringModel,
+  playersById: Map<string, Player>,
+  signal?: AbortSignal,
+): Promise<SeasonPpg> {
+  const score = createScorer(scoringModel);
+  const totals = new Map<string, { total: number; games: number }>();
+  const weekNumbers = Array.from({ length: 18 }, (_, i) => i + 1);
+
+  await mapLimit(weekNumbers, 4, async (week) => {
+    const res = await cached(`stats:${season}:${week}`, TTL.FINAL_WEEK, () =>
+      getWeekStats(season, week, 'regular', signal),
+    ).catch(() => null);
+    if (!res) return;
+
+    for (const [pid, line] of Object.entries(res.stats)) {
+      if (!playersById.has(pid) || !hasPlayed(line)) continue;
+      const t = totals.get(pid) ?? { total: 0, games: 0 };
+      t.total += score(line);
+      t.games += 1;
+      totals.set(pid, t);
+    }
+  });
+
+  const out: SeasonPpg = new Map();
+  for (const [pid, t] of totals) {
+    if (t.games > 0) out.set(pid, { ppg: t.total / t.games, games: t.games });
+  }
+  return out;
 }
 
 /**
@@ -349,7 +406,7 @@ export async function loadLeague(
     throughWeek: currentWeek,
   });
 
-  report('Computing metrics', 1, 2);
+  report('Computing metrics', 1, 3);
 
   const matchupIndex = buildMatchupIndex({
     scoringModel,
@@ -360,7 +417,55 @@ export async function loadLeague(
     throughWeek: currentWeek,
   });
 
-  report('Ready', 2, 2);
+  report('Loading dynasty inputs', 2, 3);
+
+  // Dynasty inputs are all best-effort third-party / historical data: the two
+  // prior seasons' production (for the 80/20 multi-year blend) and the current
+  // trade market. A failure in either degrades the dynasty score gracefully
+  // rather than blocking the app, so the core in-season views never wait on them.
+  const priorYears = [String(Number(season) - 1), String(Number(season) - 2)];
+  const marketQuery = marketQueryFromLeague(
+    league.roster_positions,
+    league.total_rosters,
+    league.scoring_settings?.rec,
+  );
+  const [priorSeasons, market] = await Promise.all([
+    Promise.all(
+      priorYears.map((year) =>
+        loadSeasonPpg(year, scoringModel, playersById, signal).catch(
+          () => new Map() as SeasonPpg,
+        ),
+      ),
+    ),
+    getMarketValues(marketQuery, signal).catch(() => new Map()),
+  ]);
+
+  const dynastyIndex = buildDynastyIndex({
+    valueIndex,
+    playersById,
+    priorSeasons,
+    market,
+    rosterPositions: league.roster_positions ?? [],
+    numTeams: league.total_rosters ?? rosters.length,
+    throughWeek: currentWeek,
+  });
+
+  // The one headline number: the average of in-season form and dynasty value,
+  // both within-position. A player with only one of the two carries that one.
+  const combinedScores = new Map<string, number>();
+  const scoredPids = new Set<string>([
+    ...valueIndex.byPlayer.keys(),
+    ...dynastyIndex.byPlayer.keys(),
+  ]);
+  for (const pid of scoredPids) {
+    const v = valueIndex.byPlayer.get(pid)?.score ?? null;
+    const d = dynastyIndex.byPlayer.get(pid)?.score ?? null;
+    if (v !== null && d !== null) combinedScores.set(pid, Math.round((v + d) / 2));
+    else if (v !== null) combinedScores.set(pid, v);
+    else if (d !== null) combinedScores.set(pid, d);
+  }
+
+  report('Ready', 3, 3);
 
   return {
     season,
@@ -380,6 +485,8 @@ export async function loadLeague(
     maxWeek,
     starterSlots: starterSlots(league.roster_positions),
     valueIndex,
+    dynastyIndex,
+    combinedScores,
     matchupIndex,
   };
 }
