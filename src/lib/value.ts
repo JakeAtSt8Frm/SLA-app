@@ -1,5 +1,5 @@
 /**
- * Current Form Score (0–1000).
+ * Player Value Score (0–1000).
  *
  * A season-long, in-season valuation of a player built entirely from custom-
  * scored production. The model blends 11 normalised signals, every one of which

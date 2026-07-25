@@ -10,7 +10,6 @@
     "preview": "vite preview",
     "research": "tsx scripts/research-models.ts",
     "verify": "tsx scripts/verify-scoring.ts",
-    "verify:dynasty": "tsx scripts/verify-dynasty.ts",
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {

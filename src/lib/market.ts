@@ -9,8 +9,10 @@
  * backend-less static site.
  *
  * Everything here is best-effort: the feed is a third party, so a failure must
- * degrade to "no market data" rather than break the load. Missing market data
- * does not change intrinsic value; it only removes consensus and gap outputs.
+ * degrade to "no market data" rather than break the load. The dynasty model
+ * treats a missing market value as neutral, which is also what happens for IDPs
+ * — FantasyCalc only values offensive players and picks, so DL/LB/DB legitimately
+ * come back empty and fall back to their production-only valuation.
  */
 
 const FANTASYCALC = 'https://api.fantasycalc.com/values/current';
@@ -31,22 +33,10 @@ export interface MarketEntry {
   adp: number | null;
   /** How often the asset actually trades — a liquidity proxy. */
   tradeFrequency: number | null;
-  /**
-   * Objective NFL draft capital carried by the feed.
-   *
-   * This may inform a market-independent rookie prior; `value`, rank, ADP and
-   * trade frequency must never enter intrinsic dynasty value.
-   */
-  draftRound: number | null;
-  draftPick: number | null;
 }
 
 interface RawFantasyCalcEntry {
-  player?: {
-    sleeperId?: string | null;
-    position?: string | null;
-    maybeDraftInfo?: { round?: number | null; pick?: number | null } | null;
-  };
+  player?: { sleeperId?: string | null; position?: string | null };
   value?: number;
   overallRank?: number;
   positionRank?: number;
@@ -87,7 +77,8 @@ export function marketQueryFromLeague(
 /**
  * Fetches current dynasty market values keyed by Sleeper player id.
  *
- * Returns an empty map on any failure. Intrinsic value is unaffected.
+ * Returns an empty map on any failure; the model reads a missing entry as a
+ * neutral market signal rather than a zero.
  */
 export async function getMarketValues(
   query: MarketQuery,
@@ -118,14 +109,6 @@ export async function getMarketValues(
         adp: typeof entry.maybeAdp === 'number' ? entry.maybeAdp : null,
         tradeFrequency:
           typeof entry.maybeTradeFrequency === 'number' ? entry.maybeTradeFrequency : null,
-        draftRound:
-          typeof entry.player?.maybeDraftInfo?.round === 'number'
-            ? entry.player.maybeDraftInfo.round
-            : null,
-        draftPick:
-          typeof entry.player?.maybeDraftInfo?.pick === 'number'
-            ? entry.player.maybeDraftInfo.pick
-            : null,
       });
     }
   } catch {

@@ -1,69 +1,84 @@
 /**
- * Market-independent, league-specific dynasty valuation.
+ * Dynasty Value Score (0–1000).
  *
- * The headline score answers "how much future lineup value should this player
- * create in this league?" FantasyCalc is deliberately kept outside that answer:
- * it is normalized separately, then compared with intrinsic value for the
- * buy/sell verdict and optionally blended into a consensus score.
+ * A *dynasty* valuation is a different question than the in-season Value Score in
+ * `value.ts`. That model deliberately excludes age and asks "who is producing
+ * right now". This one asks "what should this player be worth as a long-term
+ * asset", and to answer it honestly it has to weigh things the in-season model
+ * ignores on purpose: value over replacement, positional scarcity, age and
+ * career runway, role security, and — the piece Sleeper cannot give us — the
+ * current trade market.
  *
- * Production is cardinal rather than rank-only. A game-weighted Bayesian talent
- * estimate feeds discounted future points above two league-specific baselines:
+ * Two numbers fall out of that. The intrinsic dynasty score (what the player
+ * should be worth) and the market's price (FantasyCalc). The gap between them is
+ * the actionable output: buy-low when intrinsic beats market, sell-high when
+ * market beats intrinsic.
  *
- *  - the marginal starter from an exact league-wide lineup assignment; and
- *  - the best currently unrostered player at the position.
- *
- * That preserves the size of elite advantages and lets superflex, flex, TE
- * premium, deep IDP lineups and a shallow player pool affect value directly.
+ * Design choices worth preserving:
+ *  - Production is blended across seasons: 80% the current year, 20% the prior
+ *    two, so a single hot or cold season doesn't define a multi-year asset.
+ *  - Production enters as VORP (points above the league's real replacement level,
+ *    derived from its actual starting requirements) and is percentiled *across
+ *    all positions*, so a scarce-position starter outranks a deep-position one —
+ *    the whole point of a superflex, TE-premium, IDP league.
+ *  - Age is a position-specific longevity curve, not a flat cutoff.
+ *  - A missing market value (every IDP, since FantasyCalc doesn't price them) is
+ *    read as neutral, never as zero.
  */
 
 import { longevity, resolveAge } from './longevity';
 import type { MarketEntry } from './market';
-import { computeOptimalLineup, slotAccepts, starterSlots } from './optimal';
-import { groupForPlayer } from './scoring';
-import { clamp01, percentileRanks, quantile, round } from './stats';
+import { clamp01, percentileRanks, round } from './stats';
 import type { Player, PositionGroup } from './types';
 import type { ValueIndex } from './value';
 
-/** Per-game recency weights, newest season first. */
-export const SEASON_GAME_WEIGHTS = [1, 0.55, 0.3] as const;
-/** Equivalent games in the position/role/draft-capital prior. */
-export const TALENT_PRIOR_GAMES = 8;
-const FUTURE_DISCOUNTS = [1, 0.8, 0.64] as const;
-const EXPECTED_SEASON_GAMES = 17;
-const STARTER_VALUE_SHARE = 0.7;
-const WAIVER_VALUE_SHARE = 1 - STARTER_VALUE_SHARE;
+/** Blend weight on the current season; the prior two share the remainder. */
+export const CURRENT_SEASON_WEIGHT = 0.8;
 
 /**
- * Intrinsic legs. Market is intentionally absent, and age is integrated into
- * each future-season projection rather than awarded again as a flat bonus.
+ * Dynasty leg weights (sum ~1.0), tuned for a superflex, TE-premium, IDP league.
+ *
+ * Every leg is percentiled *within the player's own position group*, so the
+ * dynasty score is directly averageable with the in-season Value Score and both
+ * read the same way: "top of his own pool", not comparable across positions.
+ * (Cross-position scarcity therefore isn't a leg — within a group it would be a
+ * constant and change no ordering; positional scarcity instead lives implicitly
+ * in each group's own VORP-over-replacement spread.)
+ *
+ * Production dominates but does not swamp; age carries real weight because this
+ * is a forward-looking model; market is a meaningful but minority voice so the
+ * score stays an *intrinsic* opinion the market can be measured against.
  */
 export const DYNASTY_WEIGHTS = {
-  production: 0.68,
-  role: 0.14,
-  insulation: 0.08,
+  production: 0.4,
+  age: 0.16,
+  market: 0.16,
+  role: 0.12,
+  insulation: 0.06,
   efficiency: 0.05,
-  availability: 0.05,
+  risk: 0.05,
 } as const;
 
-type DynastyLeg = keyof typeof DYNASTY_WEIGHTS;
-type DynastyWeights = Record<DynastyLeg, number>;
-
-/** Win-now lens: immediate lineup gain and current availability matter more. */
-const CONTENDER_WEIGHTS: DynastyWeights = {
-  production: 0.72,
-  role: 0.15,
-  insulation: 0.03,
-  efficiency: 0.04,
-  availability: 0.06,
+/** Contender lens: reweight toward immediate, available production. */
+const CONTENDER_WEIGHTS: Record<keyof typeof DYNASTY_WEIGHTS, number> = {
+  production: 0.45,
+  age: 0.05,
+  market: 0.12,
+  role: 0.16,
+  insulation: 0.05,
+  efficiency: 0.07,
+  risk: 0.1,
 };
 
-/** Rebuilder lens: discounted future gain plus market-free role insulation. */
-const REBUILDER_WEIGHTS: DynastyWeights = {
-  production: 0.62,
-  role: 0.12,
-  insulation: 0.18,
-  efficiency: 0.03,
-  availability: 0.05,
+/** Rebuilder lens: reweight toward youth, insulation and liquidity. */
+const REBUILDER_WEIGHTS: Record<keyof typeof DYNASTY_WEIGHTS, number> = {
+  production: 0.3,
+  age: 0.28,
+  market: 0.16,
+  role: 0.08,
+  insulation: 0.1,
+  efficiency: 0.04,
+  risk: 0.04,
 };
 
 export type MarketVerdict = 'Buy' | 'Sell' | 'Fair' | 'No market';
@@ -77,21 +92,11 @@ export interface DynastyBreakdown {
   games: number;
   currentPpg: number | null;
   priorPpg: number | null;
-  /** Bayesian, game-weighted estimate of current scoring talent. */
-  projectedPpg: number;
-  /** Exact league-wide marginal starter baseline. */
+  blendedPpg: number | null;
   replacementPpg: number;
-  /** Best currently unrostered player at the position. */
-  waiverReplacementPpg: number;
-  /** Current projected PPG over the starter baseline. */
-  vorp: number;
-  /** Three-year discounted lineup points above both replacement concepts. */
-  futureVorp: number;
+  vorp: number | null;
   contenderScore: number;
   rebuilderScore: number;
-  consensusScore: number;
-  marketScore: number | null;
-  valueGap: number | null;
   marketValue: number | null;
   marketOverallRank: number | null;
   marketPositionRank: number | null;
@@ -99,9 +104,7 @@ export interface DynastyBreakdown {
   marketTrend: Trend;
   liquidity: Liquidity;
   injuryRisk: RiskBand;
-  /** Evidence strength behind the production estimate, 0..1. */
-  productionConfidence: number;
-  /** Value tier label derived from intrinsic score. */
+  /** Value tier label derived from the score, e.g. "Elite dynasty asset". */
   tier: string;
   /** Per-leg contributions, for the "why this score" panel. */
   contributions: Array<{ label: string; weight: number; normalized: number; points: number }>;
@@ -109,7 +112,6 @@ export interface DynastyBreakdown {
 
 export interface DynastyValue {
   pid: string;
-  /** Market-independent intrinsic dynasty value, 0..1000. */
   score: number;
   group: PositionGroup;
   breakdown: DynastyBreakdown;
@@ -117,13 +119,11 @@ export interface DynastyValue {
 
 export interface DynastyIndex {
   byPlayer: Map<string, DynastyValue>;
-  /** Exact marginal-starter PPG by position group. */
+  /** Replacement-level blended PPG per position group, for display. */
   replacementByGroup: Map<PositionGroup, number>;
-  /** Best unrostered PPG by position group. */
-  waiverReplacementByGroup: Map<PositionGroup, number>;
 }
 
-/** Per-player production summary for one prior season. */
+/** Per-player blended production summary for one prior season. */
 export type SeasonPpg = Map<string, { ppg: number; games: number }>;
 
 export interface BuildDynastyIndexInput {
@@ -134,43 +134,119 @@ export interface BuildDynastyIndexInput {
   market: Map<string, MarketEntry>;
   rosterPositions: string[];
   numTeams: number;
-  /** Players on active rosters, taxi squads or reserve. */
-  rosteredPlayerIds?: ReadonlySet<string>;
+  /** Games needed before a player anchors replacement level. */
   throughWeek: number;
 }
 
-interface Row {
-  pid: string;
-  group: PositionGroup;
-  player: Player | undefined;
-  age: number | null;
-  games: number;
-  currentPpg: number | null;
-  priorPpg: number | null;
-  observedPpg: number | null;
-  effectiveGames: number;
-  projectedPpg: number;
-  roleRaw: number;
-  effRaw: number | null;
-  availability: number;
-  injuryFactor: number;
-  yearsExp: number | null;
-  market: MarketEntry | null;
-  draftCapital: number;
-  futureVorp: number;
-  immediateVorp: number;
-  productionConfidence: number;
+/* -------------------------------------------------------------------------- */
+/* Replacement level                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * How each roster slot distributes onto position groups.
+ *
+ * Dedicated slots map one-to-one; flex slots are split by how the flex is
+ * realistically filled. Superflex is treated as a quarterback slot because in a
+ * superflex league that is what wins there almost every week.
+ */
+const FLEX_SPLIT: Record<string, Partial<Record<PositionGroup, number>>> = {
+  FLEX: { RB: 0.35, WR: 0.5, TE: 0.15 },
+  WRRB_FLEX: { RB: 0.45, WR: 0.55 },
+  REC_FLEX: { WR: 0.7, TE: 0.3 },
+  WRRB_WRT: { RB: 0.35, WR: 0.5, TE: 0.15 },
+  SUPER_FLEX: { QB: 1 },
+  OP: { QB: 1 },
+  IDP_FLEX: { DL: 0.3, LB: 0.5, DB: 0.2 },
+  DB_FLEX: { DB: 1 },
+  DL_FLEX: { DL: 1 },
+  LB_FLEX: { LB: 1 },
+};
+
+const SLOT_TO_GROUP: Record<string, PositionGroup> = {
+  QB: 'QB',
+  RB: 'RB',
+  WR: 'WR',
+  TE: 'TE',
+  K: 'K',
+  DL: 'DL',
+  DE: 'DL',
+  DT: 'DL',
+  LB: 'LB',
+  DB: 'DB',
+  CB: 'DB',
+  S: 'DB',
+};
+
+/**
+ * Fractional starting depth per position, from the league's real lineup.
+ *
+ * e.g. a 6-team superflex league starting one QB plus a superflex yields a QB
+ * depth of 12 — replacement is roughly the 12th-best quarterback, which is why a
+ * merely-startable QB holds value the same points at RB would not.
+ */
+export function startingDepthByGroup(
+  rosterPositions: string[],
+  numTeams: number,
+): Map<PositionGroup, number> {
+  const perTeam = new Map<PositionGroup, number>();
+  const add = (group: PositionGroup, n: number) =>
+    perTeam.set(group, (perTeam.get(group) ?? 0) + n);
+
+  for (const raw of rosterPositions) {
+    const slot = String(raw).toUpperCase();
+    if (slot === 'BN' || slot === 'TAXI' || slot === 'IR') continue;
+
+    const direct = SLOT_TO_GROUP[slot];
+    if (direct) {
+      add(direct, 1);
+      continue;
+    }
+    const split = FLEX_SPLIT[slot];
+    if (split) {
+      for (const [group, share] of Object.entries(split)) {
+        add(group as PositionGroup, share ?? 0);
+      }
+    }
+  }
+
+  const depth = new Map<PositionGroup, number>();
+  for (const [group, n] of perTeam) depth.set(group, n * numTeams);
+  return depth;
 }
+
+/**
+ * Replacement-level blended PPG for a group: the production of the player right
+ * at the startable cliff. Averaged over a small band around the cliff so a
+ * single outlier doesn't set the baseline.
+ */
+function replacementPpg(sortedDesc: number[], depth: number): number {
+  if (!sortedDesc.length) return 0;
+  const idx = Math.max(0, Math.round(depth) - 1);
+  const lo = Math.max(0, idx - 1);
+  const hi = Math.min(sortedDesc.length - 1, idx + 1);
+  let sum = 0;
+  let n = 0;
+  for (let i = lo; i <= hi; i++) {
+    sum += sortedDesc[i];
+    n++;
+  }
+  // Past the end of the pool, replacement is effectively the worst startable.
+  return n ? sum / n : sortedDesc[sortedDesc.length - 1];
+}
+
+/* -------------------------------------------------------------------------- */
+/* Build                                                                       */
+/* -------------------------------------------------------------------------- */
 
 const TIERS: Array<[number, string]> = [
   [950, 'Untouchable cornerstone'],
   [900, 'Elite dynasty asset'],
   [850, 'High-end foundational asset'],
   [800, 'Strong core starter'],
-  [700, 'Quality starter'],
-  [550, 'Useful starter or premium depth'],
-  [350, 'Depth asset with meaningful value'],
-  [150, 'Situational or speculative asset'],
+  [750, 'Quality starter'],
+  [700, 'Useful starter or premium depth'],
+  [600, 'Depth asset with meaningful value'],
+  [500, 'Situational or speculative asset'],
   [0, 'Replacement-level or low-liquidity asset'],
 ];
 
@@ -179,556 +255,303 @@ function tierFor(score: number): string {
   return TIERS[TIERS.length - 1][1];
 }
 
-/**
- * Weighted production across individual season game samples.
- *
- * Unlike a fixed 80/20 season blend, one hot current-season game contributes
- * one game of evidence rather than overwhelming dozens of prior games.
- */
-function weightedProduction(
-  currentPpg: number | null,
-  currentGames: number,
-  priorSeasons: SeasonPpg[],
-  pid: string,
-): { ppg: number | null; effectiveGames: number; priorPpg: number | null } {
-  let weightedPoints = 0;
-  let effectiveGames = 0;
-  let priorPoints = 0;
-  let priorGames = 0;
-
-  if (currentPpg !== null && currentGames > 0) {
-    weightedPoints += currentPpg * currentGames * SEASON_GAME_WEIGHTS[0];
-    effectiveGames += currentGames * SEASON_GAME_WEIGHTS[0];
-  }
-
-  for (let index = 0; index < priorSeasons.length && index < 2; index++) {
-    const season = priorSeasons[index].get(pid);
-    if (!season || season.games <= 0) continue;
-    const weight = SEASON_GAME_WEIGHTS[index + 1];
-    weightedPoints += season.ppg * season.games * weight;
-    effectiveGames += season.games * weight;
-    priorPoints += season.ppg * season.games;
-    priorGames += season.games;
-  }
-
-  return {
-    ppg: effectiveGames > 0 ? weightedPoints / effectiveGames : null,
-    effectiveGames,
-    priorPpg: priorGames > 0 ? priorPoints / priorGames : null,
-  };
+interface Row {
+  pid: string;
+  group: PositionGroup;
+  age: number | null;
+  games: number;
+  currentPpg: number | null;
+  priorPpg: number | null;
+  blendedPpg: number | null;
+  vorp: number | null;
+  roleRaw: number | null;
+  effRaw: number | null;
+  availability: number;
+  injuryFactor: number;
+  yearsExp: number | null;
+  market: MarketEntry | null;
 }
 
-/** Objective NFL draft-capital strength, independent of market price. */
-function draftCapitalFor(market: MarketEntry | null): number {
-  if (!market) return 0.35;
-  if (market.draftPick !== null && market.draftPick > 0) {
-    return clamp01(1 - (market.draftPick - 1) / 220);
+/** Games-weighted prior-season PPG across the (up to two) prior seasons. */
+function priorAveragePpg(priorSeasons: SeasonPpg[], pid: string): number | null {
+  let weighted = 0;
+  let games = 0;
+  for (const season of priorSeasons) {
+    const s = season.get(pid);
+    if (s && s.games > 0) {
+      weighted += s.ppg * s.games;
+      games += s.games;
+    }
   }
-  if (market.draftRound !== null && market.draftRound > 0) {
-    return clamp01(1 - (market.draftRound - 1) / 7);
-  }
-  return 0.35;
-}
-
-/** Depth-chart/job prior used when production has not established the role. */
-function depthChartRoleFor(player: Player | undefined): number {
-  if (!player || player.active === false) return 0.2;
-  const order = player.depth_chart_order;
-  if (typeof order === 'number' && order > 0) {
-    if (order === 1) return 0.95;
-    if (order === 2) return 0.72;
-    if (order === 3) return 0.5;
-    return 0.32;
-  }
-  return player.team ? 0.45 : 0.25;
+  return games > 0 ? weighted / games : null;
 }
 
 /**
- * Independent prior for a player with limited NFL evidence.
- *
- * Rookies use objective draft capital, age-position runway and depth-chart
- * standing. No FantasyCalc value, rank, ADP or trade frequency enters here.
+ * Blends current and prior production per the 80/20 rule. Falls back gracefully:
+ * a player with only current data keeps it, one with only prior data (didn't
+ * play this year) is carried at his prior form.
  */
-function priorTalentPpg(row: Row, positionBaseline: number): number {
-  const depthRole = depthChartRoleFor(row.player);
-  const isRookie = row.yearsExp === 0;
-  if (!isRookie) return positionBaseline * (0.65 + 0.35 * depthRole);
-
-  const prospectStrength =
-    0.55 * row.draftCapital +
-    0.25 * depthRole +
-    0.2 * longevity(row.group, row.age);
-  return positionBaseline * (0.55 + 0.75 * prospectStrength);
+function blendPpg(current: number | null, prior: number | null): number | null {
+  if (current !== null && prior !== null) {
+    return CURRENT_SEASON_WEIGHT * current + (1 - CURRENT_SEASON_WEIGHT) * prior;
+  }
+  return current ?? prior;
 }
 
-/**
- * Position-aware role signal. Box-score "opportunities" are outcomes for IDPs,
- * so defensive snap share receives most of the weight when it is available.
- */
-function roleFor(
-  group: PositionGroup,
-  share: number | null,
-  snaps: number | null,
-  fallback: number,
-): number {
-  const snap = snaps === null ? null : clamp01(snaps / 100);
-  const opportunity = share === null ? null : clamp01(share);
-  const weights =
-    group === 'DL' || group === 'LB' || group === 'DB'
-      ? { opportunity: 0.2, snap: 0.8 }
-      : group === 'QB'
-        ? { opportunity: 0.25, snap: 0.75 }
-        : { opportunity: 0.6, snap: 0.4 };
-
-  const numerator =
-    (opportunity === null ? 0 : opportunity * weights.opportunity) +
-    (snap === null ? 0 : snap * weights.snap);
-  const denominator =
-    (opportunity === null ? 0 : weights.opportunity) +
-    (snap === null ? 0 : weights.snap);
-  return denominator > 0 ? numerator / denominator : fallback;
-}
-
-function currentAvailability(games: number, throughWeek: number): number {
-  const observedWeeks = Math.max(games, Math.min(EXPECTED_SEASON_GAMES, throughWeek));
-  // Eight and a half available games in a ten-game prior prevents early-season
-  // absences and bye timing from dominating a three-year valuation.
-  return clamp01((games + 8.5) / (observedWeeks + 10));
-}
-
-/** Current injury designation only affects the contender lens. */
+/** Maps a current injury designation to a 0..1 availability multiplier. */
 function injuryFactorFor(player: Player | undefined): number {
   const status = String(player?.injury_status ?? player?.status ?? '')
     .trim()
     .toUpperCase();
   if (!status || status === 'ACTIVE') return 1;
   if (status === 'QUESTIONABLE') return 0.92;
-  if (status === 'DOUBTFUL') return 0.78;
-  if (status === 'IR' || status === 'PUP' || status === 'NFI') return 0.5;
+  if (status === 'DOUBTFUL') return 0.8;
+  if (status === 'IR' || status === 'PUP' || status === 'NFI') return 0.55;
   if (status === 'OUT' || status === 'SUSP' || status === 'SUSPENDED') return 0.65;
   return 0.85;
-}
-
-function allLeagueStarterSlots(rosterPositions: string[], numTeams: number): string[] {
-  const perTeam = starterSlots(rosterPositions);
-  return Array.from({ length: Math.max(1, numTeams) }, () => perTeam).flat();
-}
-
-/**
- * Keeps only candidates capable of affecting the exact assignment.
- *
- * A position cannot fill more slots than accept that position, so players below
- * that count plus a two-player replacement buffer cannot change the result.
- */
-function assignmentCandidates(rows: Row[], slots: string[]) {
-  const byGroup = new Map<PositionGroup, Row[]>();
-  for (const row of rows) {
-    if (!Number.isFinite(row.projectedPpg)) continue;
-    const bucket = byGroup.get(row.group);
-    if (bucket) bucket.push(row);
-    else byGroup.set(row.group, [row]);
-  }
-
-  return [...byGroup.entries()].flatMap(([group, groupRows]) => {
-    const eligibleSlots = slots.filter((slot) => slotAccepts(slot, group)).length;
-    return groupRows
-      .sort((a, b) => b.projectedPpg - a.projectedPpg)
-      .slice(0, eligibleSlots + 2)
-      .map((row) => ({ pid: row.pid, group, points: row.projectedPpg }));
-  });
-}
-
-/**
- * Exact marginal-starter threshold by group.
- *
- * For each position we remove the lowest selected player in that group and
- * resolve the assignment. The lost total is that player's true marginal lineup
- * gain, including any cross-position flex reshuffle; subtracting it from his PPG
- * yields the effective replacement threshold for every player in the group.
- */
-function exactStarterReplacement(
-  rows: Row[],
-  rosterPositions: string[],
-  numTeams: number,
-): Map<PositionGroup, number> {
-  const slots = allLeagueStarterSlots(rosterPositions, numTeams);
-  const replacement = new Map<PositionGroup, number>();
-  if (!slots.length) return replacement;
-
-  const candidates = assignmentCandidates(rows, slots);
-  const baseline = computeOptimalLineup(slots, candidates);
-  const candidatesByPid = new Map(candidates.map((candidate) => [candidate.pid, candidate]));
-  const selectedByGroup = new Map<PositionGroup, typeof candidates>();
-
-  for (const assignment of baseline.assignments) {
-    if (!assignment.pid) continue;
-    const candidate = candidatesByPid.get(assignment.pid);
-    if (!candidate || candidate.group === null) continue;
-    const bucket = selectedByGroup.get(candidate.group);
-    if (bucket) bucket.push(candidate);
-    else selectedByGroup.set(candidate.group, [candidate]);
-  }
-
-  for (const [group, selected] of selectedByGroup) {
-    const marginalStarter = selected.reduce((lowest, row) =>
-      row.points < lowest.points ? row : lowest,
-    );
-    const without = computeOptimalLineup(
-      slots,
-      candidates.filter((candidate) => candidate.pid !== marginalStarter.pid),
-    );
-    const marginalGain = Math.max(0, baseline.total - without.total);
-    replacement.set(group, Math.max(0, marginalStarter.points - marginalGain));
-  }
-
-  return replacement;
-}
-
-function fallbackBaseline(rows: Row[], group: PositionGroup): number {
-  const values = rows
-    .filter((row) => row.group === group && row.observedPpg !== null)
-    .map((row) => row.observedPpg as number);
-  return values.length ? quantile(values, 0.55) : 0;
-}
-
-function waiverReplacement(
-  rows: Row[],
-  rosteredPlayerIds: ReadonlySet<string> | undefined,
-  starterReplacement: Map<PositionGroup, number>,
-): Map<PositionGroup, number> {
-  const replacement = new Map<PositionGroup, number>();
-  if (!rosteredPlayerIds) return new Map(starterReplacement);
-
-  for (const row of rows) {
-    if (rosteredPlayerIds.has(row.pid)) continue;
-    replacement.set(
-      row.group,
-      Math.max(replacement.get(row.group) ?? 0, row.projectedPpg),
-    );
-  }
-
-  for (const [group, starter] of starterReplacement) {
-    if (!replacement.has(group)) replacement.set(group, starter);
-  }
-  return replacement;
-}
-
-function magnitudeScore(value: number, scale: number): number {
-  if (scale <= 0) return 0;
-  // A mildly convex transform preserves cardinal differences and gives elite
-  // lineup advantages the premium they merit in a shallow league.
-  return Math.pow(clamp01(value / scale), 1.1);
-}
-
-function scoringScale(values: number[]): number {
-  const positive = values.filter((value) => value > 0 && Number.isFinite(value));
-  return positive.length ? Math.max(1, quantile(positive, 0.98)) : 1;
-}
-
-function rawFor(weights: DynastyWeights, legs: Record<DynastyLeg, number>): number {
-  let total = 0;
-  for (const key of Object.keys(weights) as DynastyLeg[]) total += weights[key] * legs[key];
-  return clamp01(total);
 }
 
 export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
   const { valueIndex, playersById, priorSeasons, market, rosterPositions, numTeams } = input;
 
-  // Current producers plus market-covered rookies/stashes form the useful pool.
+  const depth = startingDepthByGroup(rosterPositions, numTeams);
+
+  // The universe: everyone with current-season production, plus market-priced
+  // players who haven't recorded a snap (stashed rookies, returning veterans).
   const pids = new Set<string>(valueIndex.byPlayer.keys());
   for (const pid of market.keys()) if (playersById.has(pid)) pids.add(pid);
 
   const rows: Row[] = [];
+  const byGroup = new Map<PositionGroup, Row[]>();
+
   for (const pid of pids) {
-    const value = valueIndex.byPlayer.get(pid);
+    const v = valueIndex.byPlayer.get(pid);
     const player = playersById.get(pid);
-    const group = value?.group ?? groupForPlayer(player);
+    const group = v?.group ?? groupOf(player);
     if (!group) continue;
 
-    const breakdown = value?.breakdown;
-    const games = breakdown?.games ?? 0;
-    const currentPpg = breakdown?.ppg ?? null;
-    const production = weightedProduction(currentPpg, games, priorSeasons, pid);
-    const marketEntry = market.get(pid) ?? null;
-    const depthRole = depthChartRoleFor(player);
-    const share =
-      breakdown?.recentOpportunityShare ?? breakdown?.opportunityShare ?? null;
-    const snaps = breakdown?.recentSnapPct ?? breakdown?.snapPct ?? null;
+    const b = v?.breakdown;
+    const games = b?.games ?? 0;
+    const currentPpg = b ? b.ppg : null;
+    const priorPpg = priorAveragePpg(priorSeasons, pid);
+    const blendedPpg = blendPpg(currentPpg, priorPpg);
 
-    rows.push({
+    // Role: recent opportunity share leads, snap share supports.
+    const share = b?.recentOpportunityShare ?? b?.opportunityShare ?? null;
+    const snap = b?.recentSnapPct ?? b?.snapPct ?? null;
+    let roleRaw: number | null = null;
+    if (share !== null || snap !== null) {
+      const parts: number[] = [];
+      if (share !== null) parts.push(clamp01(share) * 0.6);
+      if (snap !== null) parts.push(clamp01(snap / 100) * 0.4);
+      const denom = (share !== null ? 0.6 : 0) + (snap !== null ? 0.4 : 0);
+      roleRaw = denom ? parts.reduce((x, y) => x + y, 0) / denom : null;
+    }
+
+    const row: Row = {
       pid,
       group,
-      player,
       age: resolveAge(player),
       games,
       currentPpg,
-      priorPpg: production.priorPpg,
-      observedPpg: production.ppg,
-      effectiveGames: production.effectiveGames,
-      // Seed the first exact assignment with observed production.
-      projectedPpg: production.ppg ?? 0,
-      roleRaw: roleFor(group, share, snaps, depthRole),
-      effRaw: breakdown?.efficiency ?? null,
-      availability: currentAvailability(games, input.throughWeek),
+      priorPpg,
+      blendedPpg,
+      vorp: null,
+      roleRaw,
+      effRaw: b?.efficiency ?? null,
+      availability: b ? b.availability : 0.6,
       injuryFactor: injuryFactorFor(player),
       yearsExp: typeof player?.years_exp === 'number' ? player.years_exp : null,
-      market: marketEntry,
-      draftCapital: draftCapitalFor(marketEntry),
-      futureVorp: 0,
-      immediateVorp: 0,
-      productionConfidence: clamp01(
-        production.effectiveGames / (production.effectiveGames + TALENT_PRIOR_GAMES),
-      ),
-    });
-  }
-
-  // The first pass supplies a league-shaped prior baseline; after Bayesian
-  // stabilization, the assignment is rerun on the final talent estimates.
-  const initialReplacement = exactStarterReplacement(rows, rosterPositions, numTeams);
-  for (const row of rows) {
-    const baseline =
-      initialReplacement.get(row.group) ?? fallbackBaseline(rows, row.group);
-    const prior = priorTalentPpg(row, baseline);
-    row.projectedPpg =
-      row.observedPpg === null
-        ? prior
-        : (row.observedPpg * row.effectiveGames + prior * TALENT_PRIOR_GAMES) /
-          (row.effectiveGames + TALENT_PRIOR_GAMES);
-  }
-
-  const replacementByGroup = exactStarterReplacement(rows, rosterPositions, numTeams);
-  for (const row of rows) {
-    if (!replacementByGroup.has(row.group)) {
-      replacementByGroup.set(row.group, fallbackBaseline(rows, row.group));
-    }
-  }
-  const waiverReplacementByGroup = waiverReplacement(
-    rows,
-    input.rosteredPlayerIds,
-    replacementByGroup,
-  );
-
-  const byGroup = new Map<PositionGroup, Row[]>();
-  for (const row of rows) {
-    const bucket = byGroup.get(row.group);
+      market: market.get(pid) ?? null,
+    };
+    rows.push(row);
+    const bucket = byGroup.get(group);
     if (bucket) bucket.push(row);
-    else byGroup.set(row.group, [row]);
+    else byGroup.set(group, [row]);
   }
 
-  const roleByGroup = new Map<PositionGroup, Map<string, number>>();
-  const efficiencyByGroup = new Map<PositionGroup, Map<string, number>>();
+  // Replacement level per group, from qualified producers only, then VORP.
+  const replacementByGroup = new Map<PositionGroup, number>();
+  const minGames = Math.max(2, Math.floor(input.throughWeek * 0.3));
   for (const [group, groupRows] of byGroup) {
-    roleByGroup.set(
-      group,
-      percentileRanks(groupRows.map((row) => ({ id: row.pid, value: row.roleRaw }))),
-    );
-    efficiencyByGroup.set(
-      group,
-      percentileRanks(
-        groupRows
-          .filter((row) => row.effRaw !== null)
-          .map((row) => ({ id: row.pid, value: row.effRaw as number })),
-      ),
-    );
-  }
-
-  const rowSignals = new Map<
-    string,
-    {
-      role: number;
-      efficiency: number;
-      insulation: number;
-      futureVorp: number;
-      immediateVorp: number;
+    const producers = groupRows
+      .filter((r) => r.blendedPpg !== null && (r.games >= minGames || r.priorPpg !== null))
+      .map((r) => r.blendedPpg as number)
+      .sort((a, b) => b - a);
+    const repl = replacementPpg(producers, depth.get(group) ?? producers.length);
+    replacementByGroup.set(group, repl);
+    for (const r of groupRows) {
+      if (r.blendedPpg !== null) r.vorp = r.blendedPpg - repl;
     }
-  >();
-
-  for (const row of rows) {
-    const starterReplacement = replacementByGroup.get(row.group) ?? 0;
-    const waiver = waiverReplacementByGroup.get(row.group) ?? starterReplacement;
-    const role = roleByGroup.get(row.group)?.get(row.pid) ?? 0.5;
-    const efficiency =
-      row.effRaw === null
-        ? 0.5
-        : (efficiencyByGroup.get(row.group)?.get(row.pid) ?? 0.5);
-    const youthExperience =
-      row.yearsExp === null ? 0.5 : clamp01(1 - row.yearsExp / 10);
-    const insulation = clamp01(
-      0.45 * longevity(row.group, row.age) +
-        0.3 * role +
-        0.15 * youthExperience +
-        0.1 * row.draftCapital,
-    );
-
-    row.immediateVorp =
-      STARTER_VALUE_SHARE * Math.max(0, row.projectedPpg - starterReplacement) +
-      WAIVER_VALUE_SHARE * Math.max(0, row.projectedPpg - waiver);
-
-    const currentLongevity = longevity(row.group, row.age);
-    const expectedGames = EXPECTED_SEASON_GAMES * (0.8 + 0.2 * row.availability);
-    let futureVorp = 0;
-    for (let year = 0; year < FUTURE_DISCOUNTS.length; year++) {
-      const ageFactor =
-        row.age === null || currentLongevity <= 0
-          ? 1
-          : clamp01(longevity(row.group, row.age + year) / currentLongevity);
-      const roleProbability =
-        (0.78 + 0.22 * role) * Math.pow(0.82 + 0.16 * insulation, year);
-      const futurePpg = row.projectedPpg * ageFactor;
-      const marginalPpg =
-        STARTER_VALUE_SHARE * Math.max(0, futurePpg - starterReplacement) +
-        WAIVER_VALUE_SHARE * Math.max(0, futurePpg - waiver);
-      futureVorp +=
-        FUTURE_DISCOUNTS[year] * expectedGames * roleProbability * marginalPpg;
-    }
-    row.futureVorp = futureVorp;
-    rowSignals.set(row.pid, {
-      role,
-      efficiency,
-      insulation,
-      futureVorp,
-      immediateVorp: row.immediateVorp,
-    });
   }
 
-  const futureScale = scoringScale(rows.map((row) => row.futureVorp));
-  const immediateScale = scoringScale(rows.map((row) => row.immediateVorp));
-  const marketScale = scoringScale(
-    rows.flatMap((row) => (row.market ? [row.market.value] : [])),
-  );
-
-  const intrinsicByPlayer = new Map<string, number>();
-  for (const row of rows) {
-    const signals = rowSignals.get(row.pid);
-    if (!signals) continue;
-    intrinsicByPlayer.set(
-      row.pid,
-      rawFor(DYNASTY_WEIGHTS, {
-        production: magnitudeScore(signals.futureVorp, futureScale),
-        role: signals.role,
-        insulation: signals.insulation,
-        efficiency: signals.efficiency,
-        availability: row.availability,
-      }),
+  // Every leg is percentiled *within its own position group*, so the dynasty
+  // score is on the same footing as the in-season Value Score and the two can be
+  // averaged into a single number. VORP is percentiled in-group rather than
+  // globally: "how far above a startable player at your position" is what a
+  // dynasty owner is actually paying for, and positional scarcity is already
+  // baked into each group's own replacement level.
+  const vorpByGroup = new Map<PositionGroup, Map<string, number>>();
+  const marketByGroup = new Map<PositionGroup, Map<string, number>>();
+  const roleByGroup = new Map<PositionGroup, Map<string, number>>();
+  const effByGroup = new Map<PositionGroup, Map<string, number>>();
+  const inGroup = (
+    groupRows: Row[],
+    pick: (r: Row) => number | null,
+  ): Map<string, number> =>
+    percentileRanks(
+      groupRows
+        .filter((r) => pick(r) !== null)
+        .map((r) => ({ id: r.pid, value: pick(r) as number })),
     );
+  for (const [group, groupRows] of byGroup) {
+    vorpByGroup.set(group, inGroup(groupRows, (r) => r.vorp));
+    marketByGroup.set(group, inGroup(groupRows, (r) => r.market?.value ?? null));
+    roleByGroup.set(group, inGroup(groupRows, (r) => r.roleRaw));
+    effByGroup.set(group, inGroup(groupRows, (r) => r.effRaw));
   }
-  /*
-   * FantasyCalc has no IDP market. Convert its offensive-only units onto the
-   * intrinsic scale of the same covered cohort; otherwise an IDP-heavy scoring
-   * system would mechanically label nearly every offensive star a "Sell" merely
-   * because the two 0..1000 axes had different ceilings.
-   */
-  const marketComparableIntrinsic = rows
-    .filter((row) => row.market !== null)
-    .flatMap((row) => {
-      const intrinsic = intrinsicByPlayer.get(row.pid);
-      return intrinsic === undefined ? [] : [intrinsic];
-    });
-  const marketComparableCeiling = marketComparableIntrinsic.length
-    ? quantile(marketComparableIntrinsic, 0.98)
-    : 1;
 
   const byPlayer = new Map<string, DynastyValue>();
-  for (const row of rows) {
-    const signals = rowSignals.get(row.pid);
-    if (!signals) continue;
 
-    const production = magnitudeScore(signals.futureVorp, futureScale);
-    const legs: Record<DynastyLeg, number> = {
-      production,
-      role: signals.role,
-      insulation: signals.insulation,
-      efficiency: signals.efficiency,
-      availability: row.availability,
+  for (const r of rows) {
+    const market = r.market;
+    const marketNorm = market ? (marketByGroup.get(r.group)?.get(r.pid) ?? 0.5) : 0.5;
+    // Production: VORP percentile within the position when we have it; otherwise
+    // lean on the market for players with no snaps yet, and only then fall back
+    // to a low prior.
+    const prodNorm =
+      r.vorp !== null
+        ? (vorpByGroup.get(r.group)?.get(r.pid) ?? 0.4)
+        : market
+          ? marketNorm
+          : 0.3;
+    const ageNorm = longevity(r.group, r.age);
+    const roleNorm = r.roleRaw !== null ? (roleByGroup.get(r.group)?.get(r.pid) ?? 0.5) : 0.5;
+    const effNorm = r.effRaw !== null ? (effByGroup.get(r.group)?.get(r.pid) ?? 0.5) : 0.5;
+    const riskNorm = clamp01(
+      (r.games > 0 ? r.availability : 0.6) * r.injuryFactor,
+    );
+
+    // Insulation: how well value survives a rough patch — youth, a real role,
+    // market standing, and early-career draft runway.
+    const youthExp =
+      r.yearsExp === null ? 0.5 : clamp01(1 - r.yearsExp / 10);
+    const insulationNorm = clamp01(
+      0.35 * ageNorm + 0.3 * marketNorm + 0.2 * roleNorm + 0.15 * youthExp,
+    );
+
+    const legs: Record<keyof typeof DYNASTY_WEIGHTS, number> = {
+      production: prodNorm,
+      age: ageNorm,
+      market: marketNorm,
+      role: roleNorm,
+      insulation: insulationNorm,
+      efficiency: effNorm,
+      risk: riskNorm,
     };
-    const intrinsic = intrinsicByPlayer.get(row.pid) ?? rawFor(DYNASTY_WEIGHTS, legs);
-    const score = Math.round(intrinsic * 1000);
 
-    const contenderLegs: Record<DynastyLeg, number> = {
-      ...legs,
-      production: magnitudeScore(signals.immediateVorp, immediateScale),
-      availability: clamp01(row.availability * row.injuryFactor),
+    const rawFor = (weights: Record<keyof typeof DYNASTY_WEIGHTS, number>) => {
+      let sum = 0;
+      for (const key of Object.keys(weights) as Array<keyof typeof DYNASTY_WEIGHTS>) {
+        sum += weights[key] * legs[key];
+      }
+      return sum;
     };
-    const contenderScore = Math.round(rawFor(CONTENDER_WEIGHTS, contenderLegs) * 1000);
-    const rebuilderScore = Math.round(rawFor(REBUILDER_WEIGHTS, legs) * 1000);
 
-    const marketScore = row.market
-      ? Math.round(
-          magnitudeScore(row.market.value, marketScale) *
-            marketComparableCeiling *
-            1000,
-        )
-      : null;
-    const consensusScore =
-      marketScore === null ? score : Math.round(0.75 * score + 0.25 * marketScore);
-    const valueGap = marketScore === null ? null : score - marketScore;
-    // Recommendations require a wider disagreement when the talent projection
-    // rests mostly on a prior (especially rookies) and tighten only as real game
-    // evidence accumulates.
-    const uncertainty = Math.round(90 + 260 * (1 - row.productionConfidence));
-    const starterReplacement = replacementByGroup.get(row.group) ?? 0;
-    const waiver = waiverReplacementByGroup.get(row.group) ?? starterReplacement;
+    let raw = rawFor(DYNASTY_WEIGHTS);
 
-    const contributions = (Object.keys(DYNASTY_WEIGHTS) as DynastyLeg[]).map((key) => ({
-      label: LEG_LABELS[key],
-      weight: DYNASTY_WEIGHTS[key],
-      normalized: legs[key],
-      points: DYNASTY_WEIGHTS[key] * legs[key],
-    }));
+    // Small-sample handling mirrors the in-season model: blend toward neutral
+    // for players with little to go on. A market-priced player without snaps
+    // still carries real information, so he is shrunk only lightly.
+    const confidence =
+      r.games > 0 ? 0.7 + 0.3 * clamp01((r.games - 1) / 4) : market ? 0.8 : 0.55;
+    raw = 0.5 + (raw - 0.5) * confidence;
 
-    byPlayer.set(row.pid, {
-      pid: row.pid,
+    const score = Math.round(clamp01(raw) * 1000);
+    const contenderScore = Math.round(clamp01(rawFor(CONTENDER_WEIGHTS)) * 1000);
+    const rebuilderScore = Math.round(clamp01(rawFor(REBUILDER_WEIGHTS)) * 1000);
+
+    const contributions = (Object.keys(DYNASTY_WEIGHTS) as Array<keyof typeof DYNASTY_WEIGHTS>).map(
+      (key) => ({
+        label: LEG_LABELS[key],
+        weight: DYNASTY_WEIGHTS[key],
+        normalized: legs[key],
+        points: DYNASTY_WEIGHTS[key] * legs[key],
+      }),
+    );
+
+    byPlayer.set(r.pid, {
+      pid: r.pid,
       score,
-      group: row.group,
+      group: r.group,
       breakdown: {
-        group: row.group,
-        age: row.age,
-        games: row.games,
-        currentPpg: row.currentPpg === null ? null : round(row.currentPpg, 1),
-        priorPpg: row.priorPpg === null ? null : round(row.priorPpg, 1),
-        projectedPpg: round(row.projectedPpg, 1),
-        replacementPpg: round(starterReplacement, 1),
-        waiverReplacementPpg: round(waiver, 1),
-        vorp: round(row.projectedPpg - starterReplacement, 1),
-        futureVorp: round(row.futureVorp, 1),
+        group: r.group,
+        age: r.age,
+        games: r.games,
+        currentPpg: r.currentPpg === null ? null : round(r.currentPpg, 1),
+        priorPpg: r.priorPpg === null ? null : round(r.priorPpg, 1),
+        blendedPpg: r.blendedPpg === null ? null : round(r.blendedPpg, 1),
+        replacementPpg: round(replacementByGroup.get(r.group) ?? 0, 1),
+        vorp: r.vorp === null ? null : round(r.vorp, 1),
         contenderScore,
         rebuilderScore,
-        consensusScore,
-        marketScore,
-        valueGap,
-        marketValue: row.market?.value ?? null,
-        marketOverallRank: row.market?.overallRank ?? null,
-        marketPositionRank: row.market?.positionRank ?? null,
-        verdict: verdictFor(row.market, valueGap, uncertainty),
-        marketTrend: trendFor(row.market),
-        liquidity: liquidityFor(row.market, marketScore),
-        injuryRisk: riskBandFor(row.availability),
-        productionConfidence: round(row.productionConfidence, 3),
+        marketValue: market ? market.value : null,
+        marketOverallRank: market ? market.overallRank : null,
+        marketPositionRank: market ? market.positionRank : null,
+        verdict: verdictFor(market, raw, marketNorm),
+        marketTrend: trendFor(market),
+        liquidity: liquidityFor(market, marketNorm),
+        injuryRisk: riskBandFor(riskNorm),
         tier: tierFor(score),
         contributions,
       },
     });
   }
 
-  return { byPlayer, replacementByGroup, waiverReplacementByGroup };
+  return { byPlayer, replacementByGroup };
 }
 
-const LEG_LABELS: Record<DynastyLeg, string> = {
-  production: 'Future lineup value',
+/* -------------------------------------------------------------------------- */
+/* Leg helpers                                                                 */
+/* -------------------------------------------------------------------------- */
+
+const LEG_LABELS: Record<keyof typeof DYNASTY_WEIGHTS, string> = {
+  production: 'Multi-year VORP',
+  age: 'Age & longevity',
+  market: 'Market value',
   role: 'Role & usage',
-  insulation: 'Role insulation',
+  insulation: 'Value insulation',
   efficiency: 'Talent & efficiency',
-  availability: 'Expected availability',
+  risk: 'Availability & injury',
 };
+
+function groupOf(player: Player | undefined): PositionGroup | null {
+  if (!player) return null;
+  const candidates = [
+    player.position,
+    ...(player.fantasy_positions ?? []),
+    player.depth_chart_position,
+  ];
+  for (const raw of candidates) {
+    if (!raw) continue;
+    const group = SLOT_TO_GROUP[String(raw).trim().toUpperCase()];
+    if (group) return group;
+  }
+  return null;
+}
 
 function verdictFor(
   market: MarketEntry | null,
-  valueGap: number | null,
-  uncertainty: number,
+  raw: number,
+  marketNorm: number,
 ): MarketVerdict {
-  if (!market || valueGap === null) return 'No market';
-  if (valueGap > uncertainty) return 'Buy';
-  if (valueGap < -uncertainty) return 'Sell';
+  if (!market) return 'No market';
+  // Compare the intrinsic opinion (this score) against where the market prices
+  // the player within his position. A wide, consistent gap is a buy or sell
+  // signal.
+  const gap = raw - marketNorm;
+  if (gap > 0.12) return 'Buy';
+  if (gap < -0.12) return 'Sell';
   return 'Fair';
 }
 
@@ -740,19 +563,15 @@ function trendFor(market: MarketEntry | null): Trend {
   return 'Stable';
 }
 
-function liquidityFor(market: MarketEntry | null, marketScore: number | null): Liquidity {
-  if (!market || marketScore === null) return 'Low';
-  if (market.tradeFrequency !== null) {
-    if (market.tradeFrequency >= 2) return 'High';
-    if (market.tradeFrequency >= 0.5) return 'Moderate';
-  }
-  if (marketScore >= 800) return 'High';
-  if (marketScore >= 450) return 'Moderate';
+function liquidityFor(market: MarketEntry | null, marketNorm: number): Liquidity {
+  if (!market) return 'Low';
+  if (marketNorm > 0.85) return 'High';
+  if (marketNorm > 0.5) return 'Moderate';
   return 'Low';
 }
 
-function riskBandFor(availability: number): RiskBand {
-  if (availability >= 0.85) return 'Low';
-  if (availability >= 0.65) return 'Moderate';
+function riskBandFor(riskNorm: number): RiskBand {
+  if (riskNorm >= 0.8) return 'Low';
+  if (riskNorm >= 0.55) return 'Moderate';
   return 'High';
 }
