@@ -39,7 +39,7 @@ export function StatusBadge({ status, compact }: { status: PlayerStatus; compact
 }
 
 /**
- * Intrinsic dynasty value chip (0–1000).
+ * Value Score chip (0–1000).
  *
  * Sequential single-hue fill for magnitude; the number itself sits in whichever
  * ink contrasts against the generated fill rather than being colour-coded.
@@ -52,7 +52,7 @@ export function ValueChip({ score }: { score: number | null }) {
     <span
       className="chip mono"
       style={{ background, color: ink }}
-      title={`Intrinsic dynasty value ${score ?? '—'} of 1000`}
+      title={`Value ${score ?? '—'} of 1000`}
     >
       {/* Labelled so the number is self-describing; collapses to "V" when the
           container is too narrow to spell it out. */}

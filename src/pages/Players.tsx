@@ -2,8 +2,9 @@
  * Players — searchable browser over everyone, rostered or free.
  *
  * Defaults to free agents because that's the actionable list, but the whole
- * league is searchable. The default ranking is the market-independent,
- * cross-position dynasty intrinsic score.
+ * league is searchable. Ranking is by Value Score, which is computed within
+ * position group, so the DB list is ranked against other DBs rather than
+ * against quarterbacks.
  */
 
 import { useDeferredValue, useMemo, useState } from 'react';
@@ -44,15 +45,8 @@ export function PlayersPage() {
     const needle = deferredQuery.trim().toLowerCase();
     const rows: Array<{ pid: string; sortValue: number }> = [];
 
-    const pids = new Set([
-      ...data.valueIndex.byPlayer.keys(),
-      ...data.dynastyIndex.byPlayer.keys(),
-    ]);
-    for (const pid of pids) {
-      const current = data.valueIndex.byPlayer.get(pid);
-      const dynasty = data.dynastyIndex.byPlayer.get(pid);
-      const playerGroup = dynasty?.group ?? current?.group;
-      if (!playerGroup || (group !== 'ALL' && playerGroup !== group)) continue;
+    for (const [pid, value] of data.valueIndex.byPlayer) {
+      if (group !== 'ALL' && value.group !== group) continue;
 
       const isOwned = owned.has(pid);
       if (availability === 'free' && isOwned) continue;
@@ -67,14 +61,15 @@ export function PlayersPage() {
         if (!name.includes(needle) && !team.includes(needle)) continue;
       }
 
+      const b = value.breakdown;
       const sortValue =
         sort === 'value'
-          ? (data.headlineScores.get(pid) ?? 0)
+          ? (data.combinedScores.get(pid) ?? value.score)
           : sort === 'ppg'
-            ? (current?.breakdown.ppg ?? 0)
+            ? b.ppg
             : sort === 'total'
-              ? (current?.breakdown.total ?? 0)
-              : (current?.breakdown.last4 ?? 0);
+              ? b.total
+              : b.last4;
 
       rows.push({ pid, sortValue });
     }
@@ -83,15 +78,7 @@ export function PlayersPage() {
     // Cap the render — a full unfiltered list is ~1800 rows and nobody scrolls
     // past the first hundred.
     return rows.slice(0, 150).map((r) => ({
-      player: enrichPlayer(
-        data,
-        r.pid,
-        data.currentWeek,
-        data.dynastyIndex.byPlayer.get(r.pid)?.group ??
-          data.valueIndex.byPlayer.get(r.pid)?.group ??
-          '',
-        false,
-      ),
+      player: enrichPlayer(data, r.pid, data.currentWeek, data.valueIndex.byPlayer.get(r.pid)!.group, false),
       owner: ownerByPid.get(r.pid) ?? null,
     }));
   }, [data, group, availability, sort, deferredQuery, owned, ownerByPid]);
