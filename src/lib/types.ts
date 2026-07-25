@@ -169,7 +169,7 @@ export interface EnrichedPlayer {
   opponent: string | null;
   isOut: boolean;
   seasonTotal: number;
-  /** Headline Value Score (0–1000): blended in-season form and dynasty value. */
+  /** Headline Value Score (0–1000): market-independent dynasty intrinsic value. */
   valueScore: number | null;
   matchupScore: number | null;
   ppgRank: RankInfo | null;

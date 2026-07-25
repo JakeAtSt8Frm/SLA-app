@@ -45,36 +45,41 @@ points.
 
 **Custom score** — `scoring_settings` × raw stat keys. Exact, verified above.
 
-**Value Score (0–1000)** — the headline number, the **average of two
-within-position valuations**: an in-season half and a dynasty half. Every signal
-in both is a percentile *within the player's own position group*, which is what
-lets the two be averaged and read the same way — "top of his own pool", not
-comparable across positions.
+**Value Score (0–1000)** — the headline, market-independent **Intrinsic Dynasty
+Value**. It is cross-position and cardinal: a large lineup advantage is worth
+more than a small one, even when the players occupy different positions.
 
-- *In-season half* blends 11 signals, prioritising PPG (.22), exponentially
-  weighted form (.16), the current projection (.14), recent team opportunity
-  share (.12), recent snap share (.11), last-four production (.08) and
-  schedule-adjusted PPG (.07); usage, floor, availability and efficiency provide
-  the rest. This half is age- and market-blind: pure "producing now".
+- Production is estimated with a game-weighted Bayesian blend. Current games
+  count 1.0 each, prior-year games 0.55, and two-year-old games 0.30, with an
+  eight-game position/role prior. One early-season outlier therefore cannot
+  erase a full prior season.
 
-- *Dynasty half* answers "what should this player be worth to hold". Its lead
-  signal is multi-year **VORP** — production blended 80% the current season and
-  20% the prior two (scored in *this* league's format), minus the group's real
-  replacement level from the league's actual superflex/IDP starting
-  requirements. On top of it: a position-specific age/longevity curve, role and
-  usage, value insulation, efficiency, availability, and — the one thing Sleeper
-  can't provide — the current trade market from
-  [FantasyCalc](https://fantasycalc.com) (superflex- and size-matched, keyed by
-  Sleeper id). The gap between the intrinsic dynasty score and the market price
-  surfaces in the player sheet as a **Buy-low / Sell-high / Fair** verdict,
-  alongside contender- and rebuilder-lens scores. FantasyCalc doesn't price
-  IDPs, so DL/LB/DB fall back to a production-only dynasty valuation with a
-  neutral market leg.
+- The application assigns the league-wide player pool to every starting slot
+  with the same exact maximum-weight matcher used by the Optimal Lineup page.
+  Removing the marginal starter and resolving the assignment produces the
+  starter baseline without hardcoded flex splits. The best unrostered player is
+  a second waiver baseline.
 
-Both halves show their own "why" breakdown in the player sheet. Every dynasty
-input is best-effort: a failed market or prior-season fetch degrades that half
-gracefully rather than blocking the app, and a player with only one half carries
-that half as his Value Score.
+- Three discounted future seasons convert projected PPG into expected lineup
+  points over both baselines. Position-specific age curves change future
+  production and role survival inside that projection. Role, insulation,
+  efficiency and expected availability support the main production term.
+
+- *Current Form* remains the age- and market-blind 11-signal in-season model:
+  PPG, exponentially weighted form, current projection, opportunity share,
+  snaps, recent production and supporting usage/availability signals. It is
+  displayed separately because it predicts a different target.
+
+- *Market Value* from [FantasyCalc](https://fantasycalc.com) is normalized
+  separately and never enters Intrinsic Value. The market-free gap drives the
+  **Buy-low / Sell-high / Fair** verdict. A separate *Consensus Value* is 75%
+  intrinsic and 25% market. Objective NFL draft capital from the feed may inform
+  a rookie prior; FantasyCalc price, rank, ADP and trade frequency may not.
+
+Every dynasty input is best-effort: failed market or prior-season fetches
+degrade gracefully rather than blocking the application. FantasyCalc does not
+price IDPs, so those players keep a fully intrinsic score and show no market
+verdict.
 
 **Matchup Score (0–100)** — a contextual next-week rating. It combines the
 defence-only generosity model (.35), opponent-adjusted concessions (.15),
@@ -134,6 +139,10 @@ npm run dev
 
 ```bash
 npm run verify
+```
+
+```bash
+npm run verify:dynasty
 ```
 
 ```bash

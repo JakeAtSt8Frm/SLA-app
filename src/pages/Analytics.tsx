@@ -144,12 +144,9 @@ export function AnalyticsPage() {
   }, [data]);
 
   /**
-   * Whole-roster power: the average player Value Score across a team's entire
-   * roster — starters, bench, taxi and reserve — rather than the output of
-   * whoever happens to be starting. Value Score is a percentile within a
-   * player's own position group, so averaging across a roster is a fair
-   * apples-to-apples read on total talent. Positional scope narrows the average
-   * to the players a team rosters at the selected position.
+   * Whole-roster power: intrinsic dynasty value across a team's starters, bench,
+   * taxi and reserve. The score is cross-position and cardinal, so elite lineup
+   * advantages contribute more than small differences near replacement.
    *
    * The bar is scaled so the strongest roster reads 100 and the rest sit in
    * proportion to it, which shows the true size of the talent gaps.
@@ -169,10 +166,13 @@ export function AnalyticsPage() {
       ) as Record<PositionGroup, number[]>;
 
       for (const pid of ids) {
-        const value = data.valueIndex.byPlayer.get(pid);
-        if (!value) continue;
-        all.push(value.score);
-        groupValues[value.group].push(value.score);
+        const score = data.headlineScores.get(pid);
+        const group =
+          data.dynastyIndex.byPlayer.get(pid)?.group ??
+          data.valueIndex.byPlayer.get(pid)?.group;
+        if (score === undefined || !group) continue;
+        all.push(score);
+        groupValues[group].push(score);
       }
 
       // Overall stays a straight average across the whole roster — with 25-odd
@@ -424,8 +424,8 @@ export function AnalyticsPage() {
           </div>
           <p id="power-formula" className="sr-only">
             {powerScope === 'ALL'
-              ? "Overall power is the average player Value Score across a team's entire roster, including bench, taxi and reserve. The bar is scaled so the strongest roster reads 100."
-              : `${powerScope} power weights the player Value Scores of the ${powerScope}s a team rosters toward its best ones, so a deep group is not dragged down by a single low-value player. The bar is scaled so the strongest reads 100.`}
+              ? "Overall power is the average intrinsic dynasty value across a team's entire roster, including bench, taxi and reserve. The bar is scaled so the strongest roster reads 100."
+              : `${powerScope} power weights the intrinsic values of the ${powerScope}s a team rosters toward its best ones, so a deep group is not dragged down by a single low-value player. The bar is scaled so the strongest reads 100.`}
           </p>
           <div className="card-pad power-controls">
             <div className="segmented" role="group" aria-label="Power ranking scope">
