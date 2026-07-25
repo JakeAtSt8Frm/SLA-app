@@ -131,8 +131,9 @@ export function PlayerModal({ pid, week, onClose }: Props) {
             </div>
             {value && dynasty && (
               <div className="tiny muted" style={{ marginTop: 4 }}>
-                Value {p.valueScore} = average of in-season form {value.score} and dynasty{' '}
-                {dynasty.score}
+                Intrinsic dynasty {dynasty.score} · current form {value.score}
+                {dynasty.breakdown.marketScore !== null &&
+                  ` · market ${dynasty.breakdown.marketScore} · consensus ${dynasty.breakdown.consensusScore}`}
               </div>
             )}
           </div>
@@ -255,20 +256,21 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                   value={String(dynasty.breakdown.rebuilderScore)}
                   sub="long-term lens"
                 />
-                {dynasty.breakdown.vorp !== null && (
-                  <Metric
-                    label="VORP"
-                    value={fmtSigned(dynasty.breakdown.vorp)}
-                    sub="pts over replacement"
-                  />
-                )}
-                {dynasty.breakdown.blendedPpg !== null && (
-                  <Metric
-                    label="Blended PPG"
-                    value={fmt1(dynasty.breakdown.blendedPpg)}
-                    sub="80% now / 20% prior"
-                  />
-                )}
+                <Metric
+                  label="Future VORP"
+                  value={fmt1(dynasty.breakdown.futureVorp)}
+                  sub="discounted lineup pts"
+                />
+                <Metric
+                  label="Current VORP"
+                  value={fmtSigned(dynasty.breakdown.vorp)}
+                  sub="PPG over starter"
+                />
+                <Metric
+                  label="Projected talent"
+                  value={fmt1(dynasty.breakdown.projectedPpg)}
+                  sub="game-weighted Bayesian PPG"
+                />
                 {dynasty.breakdown.currentPpg !== null && (
                   <Metric label="This year PPG" value={fmt1(dynasty.breakdown.currentPpg)} />
                 )}
@@ -279,13 +281,23 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                   />
                 )}
                 <Metric
-                  label="Replacement PPG"
+                  label="Starter replacement"
                   value={fmt1(dynasty.breakdown.replacementPpg)}
-                  sub={`${dynasty.group} starter cliff`}
+                  sub="exact league assignment"
+                />
+                <Metric
+                  label="Waiver replacement"
+                  value={fmt1(dynasty.breakdown.waiverReplacementPpg)}
+                  sub="best unrostered"
                 />
                 {dynasty.breakdown.age !== null && (
                   <Metric label="Age" value={String(dynasty.breakdown.age)} />
                 )}
+                <Metric
+                  label="Production confidence"
+                  value={fmtPct(dynasty.breakdown.productionConfidence)}
+                  sub="effective game sample"
+                />
                 {dynasty.breakdown.marketValue !== null && (
                   <Metric
                     label="Market value"
@@ -297,6 +309,18 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                     }
                   />
                 )}
+                {dynasty.breakdown.marketScore !== null && (
+                  <Metric
+                    label="Market score"
+                    value={String(dynasty.breakdown.marketScore)}
+                    sub={`gap ${fmtSigned(dynasty.breakdown.valueGap ?? 0)}`}
+                  />
+                )}
+                <Metric
+                  label="Consensus"
+                  value={String(dynasty.breakdown.consensusScore)}
+                  sub="75% intrinsic / 25% market"
+                />
                 {dynasty.breakdown.marketPositionRank !== null && (
                   <Metric
                     label="Market pos rank"
@@ -309,8 +333,8 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                 Why Dynasty {dynasty.score}
               </h3>
               <div className="small muted" style={{ marginBottom: 8 }}>
-                Multi-year VORP and market are ranked across all positions; role and
-                efficiency within {dynasty.group}. Missing market (e.g. IDP) reads neutral.
+                Future lineup value preserves discounted points above the exact league-wide
+                starter and best available waiver baselines. Market value is excluded.
               </div>
               <div className="scroll-x">
                 <table className="table">
@@ -318,7 +342,7 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                     <tr>
                       <th>Signal</th>
                       <th className="num">Weight</th>
-                      <th className="num">Percentile</th>
+                      <th className="num">Normalized</th>
                       <th className="num">Contribution</th>
                     </tr>
                   </thead>
@@ -429,11 +453,11 @@ export function PlayerModal({ pid, week, onClose }: Props) {
             </section>
           )}
 
-          {/* ---- Why this Value Score ---- */}
+          {/* ---- Why this current-form score ---- */}
           {value && (
             <section>
               <h3 className="section-title">
-                Why Value {value.score}
+                Why Current Form {value.score}
               </h3>
               <div className="small muted" style={{ marginBottom: 8 }}>
                 Each term is a percentile within {value.group}, times its weight.

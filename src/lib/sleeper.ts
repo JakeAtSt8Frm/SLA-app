@@ -107,9 +107,9 @@ export const getTrendingAdds = (signal?: AbortSignal) =>
 /**
  * Ownership / start-rate research for a week.
  *
- * Feeds the (deliberately tiny) market term in the Value Score. Returns an
- * empty map rather than throwing, since this endpoint is the least reliable of
- * the set and the model treats missing market data as neutral.
+ * Feeds current ownership/start-rate context into the in-season form model.
+ * Returns an empty map rather than throwing because this endpoint is the least
+ * reliable of the set.
  */
 export async function getResearch(
   season: string,

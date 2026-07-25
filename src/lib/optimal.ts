@@ -99,8 +99,16 @@ function maxWeightAssignment(
   candidates: LineupCandidate[],
 ): Array<number | null> {
   const nSlots = slots.length;
-  const nPlayers = candidates.length;
-  if (!nSlots || !nPlayers) return new Array(nSlots).fill(null);
+  const realPlayers = candidates.length;
+  if (!nSlots || !realPlayers) return new Array(nSlots).fill(null);
+
+  /*
+   * The shortest-augmenting-path form requires columns >= rows. Real rosters
+   * normally satisfy that, but an incomplete roster (or a narrow filtered pool)
+   * may not. Zero-point dummy columns represent empty slots and keep the solver
+   * finite without ever surfacing as player assignments.
+   */
+  const nPlayers = Math.max(realPlayers, nSlots);
 
   const INELIGIBLE = 1e9;
 
@@ -109,6 +117,10 @@ function maxWeightAssignment(
   for (let i = 0; i < nSlots; i++) {
     const row = new Array<number>(nPlayers);
     for (let j = 0; j < nPlayers; j++) {
+      if (j >= realPlayers) {
+        row[j] = 0;
+        continue;
+      }
       row[j] = slotAccepts(slots[i], candidates[j].group)
         ? -candidates[j].points
         : INELIGIBLE;
@@ -167,7 +179,7 @@ function maxWeightAssignment(
   }
 
   const result = new Array<number | null>(nSlots).fill(null);
-  for (let j = 1; j <= nPlayers; j++) {
+  for (let j = 1; j <= realPlayers; j++) {
     const slotIdx = p[j] - 1;
     if (slotIdx >= 0 && slotIdx < nSlots) {
       // Reject assignments that were only made because a slot needed filling.

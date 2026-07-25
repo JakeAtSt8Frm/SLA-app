@@ -135,12 +135,11 @@ export interface LeagueData {
   valueIndex: ValueIndex;
   dynastyIndex: DynastyIndex;
   /**
-   * The single headline Value Score shown across the app: the average of the
-   * in-season Value Score and the dynasty score, both percentiled within
-   * position so the two are on the same footing. Falls back to whichever exists
-   * when a player carries only one.
+   * The headline player value shown across the app: market-independent dynasty
+   * intrinsic value. Current form and market/consensus values remain separate.
+   * Players without a dynasty projection fall back to current form.
    */
-  combinedScores: Map<string, number>;
+  headlineScores: Map<string, number>;
   matchupIndex: MatchupIndex;
 }
 
@@ -447,22 +446,29 @@ export async function loadLeague(
     market,
     rosterPositions: league.roster_positions ?? [],
     numTeams: league.total_rosters ?? rosters.length,
+    rosteredPlayerIds: new Set(
+      teams.flatMap((team) => [
+        ...(team.roster.players ?? []),
+        ...(team.roster.taxi ?? []),
+        ...(team.roster.reserve ?? []),
+      ]),
+    ),
     throughWeek: currentWeek,
   });
 
-  // The one headline number: the average of in-season form and dynasty value,
-  // both within-position. A player with only one of the two carries that one.
-  const combinedScores = new Map<string, number>();
+  // Dynasty intrinsic is the headline. The in-season model predicts a different
+  // target (current/next-week form) and is displayed independently rather than
+  // receiving an arbitrary 50% of long-term value.
+  const headlineScores = new Map<string, number>();
   const scoredPids = new Set<string>([
     ...valueIndex.byPlayer.keys(),
     ...dynastyIndex.byPlayer.keys(),
   ]);
   for (const pid of scoredPids) {
-    const v = valueIndex.byPlayer.get(pid)?.score ?? null;
     const d = dynastyIndex.byPlayer.get(pid)?.score ?? null;
-    if (v !== null && d !== null) combinedScores.set(pid, Math.round((v + d) / 2));
-    else if (v !== null) combinedScores.set(pid, v);
-    else if (d !== null) combinedScores.set(pid, d);
+    const v = valueIndex.byPlayer.get(pid)?.score ?? null;
+    if (d !== null) headlineScores.set(pid, d);
+    else if (v !== null) headlineScores.set(pid, v);
   }
 
   report('Ready', 3, 3);
@@ -486,7 +492,7 @@ export async function loadLeague(
     starterSlots: starterSlots(league.roster_positions),
     valueIndex,
     dynastyIndex,
-    combinedScores,
+    headlineScores,
     matchupIndex,
   };
 }

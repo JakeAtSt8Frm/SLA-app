@@ -85,8 +85,7 @@ export function enrichPlayer(
      */
     isOut: isOut(player) && !played,
     seasonTotal: data.valueIndex.seasonTotals.get(pid) ?? 0,
-    // The headline Value Score is the blended in-season + dynasty number.
-    valueScore: data.combinedScores.get(pid) ?? data.valueIndex.byPlayer.get(pid)?.score ?? null,
+    valueScore: data.headlineScores.get(pid) ?? data.valueIndex.byPlayer.get(pid)?.score ?? null,
     matchupScore,
     ppgRank: data.valueIndex.ppgRanks.get(pid) ?? null,
     totalRank: data.valueIndex.totalRanks.get(pid) ?? null,
@@ -375,7 +374,7 @@ export function rosteredIds(data: LeagueData): Set<string> {
 }
 
 /**
- * Available free agents, ranked by Value Score.
+ * Available free agents, ranked by intrinsic dynasty value.
  *
  * Restricted to players who have actually recorded a scoring week, since the
  * full Sleeper dictionary contains thousands of practice-squad entries that
@@ -385,7 +384,13 @@ export function freeAgents(data: LeagueData, group: PositionGroup | 'ALL'): Enri
   const owned = rosteredIds(data);
   const out: EnrichedPlayer[] = [];
 
-  for (const [pid, value] of data.valueIndex.byPlayer) {
+  const pids = new Set([
+    ...data.valueIndex.byPlayer.keys(),
+    ...data.dynastyIndex.byPlayer.keys(),
+  ]);
+  for (const pid of pids) {
+    const value = data.dynastyIndex.byPlayer.get(pid) ?? data.valueIndex.byPlayer.get(pid);
+    if (!value) continue;
     if (owned.has(pid)) continue;
     if (group !== 'ALL' && value.group !== group) continue;
     out.push(enrichPlayer(data, pid, data.currentWeek, value.group, false));
