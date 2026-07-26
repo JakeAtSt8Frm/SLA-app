@@ -5,6 +5,7 @@
 
 import { useMemo, useState } from 'react';
 import { useLeague, useLeagueData } from '../data/LeagueProvider';
+import type { LeagueData } from '../data/league';
 import { buildRosterWeek } from '../data/selectors';
 import {
   EmptyState,
@@ -19,7 +20,8 @@ import {
 import { LazyWeeklyTeamRankChart } from '../components/LazyChart';
 import { useTheme } from '../components/ThemeProvider';
 import { teamColor } from '../lib/colors';
-import { mean, quantile, round, stdev, topWeightedMean } from '../lib/stats';
+import { buildPowerIndex, powerIndexOf } from '../lib/power';
+import { mean, quantile, round, stdev } from '../lib/stats';
 import { POSITION_GROUPS, type PositionGroup } from '../lib/types';
 
 interface AllPlayRecord {
@@ -30,11 +32,19 @@ interface AllPlayRecord {
 
 type PowerScope = 'ALL' | PositionGroup;
 
-function emptyPositionTotals(): Record<PositionGroup, number> {
-  return Object.fromEntries(POSITION_GROUPS.map((group) => [group, 0])) as Record<
-    PositionGroup,
-    number
-  >;
+/** "3 slots" / "1 slot" / "1.5 slots" — flex slots split fractionally. */
+function fmtSlots(slots: number): string {
+  const rounded = Math.round(slots * 100) / 100;
+  return `${rounded} ${rounded === 1 ? 'slot' : 'slots'}`;
+}
+
+/** Surname only: the power row has one line and six teams' worth of starters. */
+function playerLabel(data: LeagueData, pid: string): string {
+  const player = data.playersById.get(pid);
+  const name = player?.full_name ?? [player?.first_name, player?.last_name].filter(Boolean).join(' ');
+  if (!name) return pid;
+  const parts = name.split(' ');
+  return parts.length > 1 ? parts.slice(1).join(' ') : name;
 }
 
 export function AnalyticsPage() {
@@ -144,70 +154,68 @@ export function AnalyticsPage() {
   }, [data]);
 
   /**
-   * Whole-roster power: the average player Value Score across a team's entire
-   * roster — starters, bench, taxi and reserve — rather than the output of
-   * whoever happens to be starting. Value Score is a percentile within a
-   * player's own position group, so averaging across a roster is a fair
-   * apples-to-apples read on total talent. Positional scope narrows the average
-   * to the players a team rosters at the selected position.
+   * Roster power, in points per week above a replacement-level roster.
    *
-   * The bar is scaled so the strongest roster reads 100 and the rest sit in
-   * proportion to it, which shows the true size of the talent gaps.
+   * The model and the reasoning behind measuring this in points rather than in
+   * averaged Value Scores live in `lib/power.ts`. Here we only feed it: every
+   * player a team holds — starters, bench, taxi and reserve — with the VORP the
+   * dynasty index already computed against this league's real starting
+   * requirements.
    */
-  const rosterValues = useMemo(() => {
-    const map = new Map<number, { overall: number; byGroup: Record<PositionGroup, number> }>();
-
-    for (const team of data.teams) {
-      const ids = new Set<string>();
-      for (const pid of team.roster.players ?? []) if (pid) ids.add(String(pid));
-      for (const pid of team.roster.taxi ?? []) if (pid) ids.add(String(pid));
-      for (const pid of team.roster.reserve ?? []) if (pid) ids.add(String(pid));
-
-      const all: number[] = [];
-      const groupValues = Object.fromEntries(
-        POSITION_GROUPS.map((group) => [group, [] as number[]]),
-      ) as Record<PositionGroup, number[]>;
-
-      for (const pid of ids) {
-        const value = data.valueIndex.byPlayer.get(pid);
-        if (!value) continue;
-        all.push(value.score);
-        groupValues[value.group].push(value.score);
-      }
-
-      // Overall stays a straight average across the whole roster — with 25-odd
-      // rated players, a single scrub barely moves it. A position group holds
-      // only a handful, so one awful value would swing a plain average wildly;
-      // there we lean on the team's best players at the position instead, so a
-      // deep group is never sunk by a lone low-value bench player.
-      const byGroup = emptyPositionTotals();
-      for (const group of POSITION_GROUPS) {
-        byGroup[group] = topWeightedMean(groupValues[group]);
-      }
-      map.set(team.rosterId, { overall: all.length ? mean(all) : 0, byGroup });
-    }
-
-    return map;
-  }, [data]);
+  const powerIndex = useMemo(
+    () =>
+      buildPowerIndex({
+        rosters: data.teams.map((team) => ({
+          rosterId: team.rosterId,
+          playerIds: [
+            ...(team.roster.players ?? []),
+            ...(team.roster.taxi ?? []),
+            ...(team.roster.reserve ?? []),
+          ]
+            .filter(Boolean)
+            .map(String),
+        })),
+        players: new Map(
+          [...data.dynastyIndex.byPlayer].map(([pid, dynasty]) => [
+            pid,
+            {
+              group: dynasty.group,
+              vorp: dynasty.breakdown.vorp,
+              value: data.combinedScores.get(pid) ?? null,
+            },
+          ]),
+        ),
+        rosterPositions: data.league.roster_positions ?? [],
+        numTeams: data.league.total_rosters ?? data.teams.length,
+      }),
+    [data],
+  );
 
   const power = useMemo(() => {
-    const metric = (rosterId: number) => {
-      const rv = rosterValues.get(rosterId);
-      if (!rv) return 0;
-      return powerScope === 'ALL' ? rv.overall : rv.byGroup[powerScope];
-    };
+    const rows = standings.map((team) => {
+      const teamPower = powerIndex.byTeam.get(team.rosterId);
+      const group = teamPower && powerScope !== 'ALL' ? teamPower.byGroup[powerScope] : null;
+      return {
+        team,
+        value: powerScope === 'ALL' ? (teamPower?.overall ?? 0) : (group?.score ?? 0),
+        group,
+      };
+    });
+    const best = Math.max(0, ...rows.map((row) => row.value));
 
-    const rows = standings.map((team) => ({ team, value: metric(team.rosterId) }));
-    const max = Math.max(1, ...rows.map((row) => row.value));
-
+    // Sorted on the raw score, not the rounded one: two teams a hundredth of a
+    // point apart round to the same tenth and would otherwise be listed in an
+    // order that contradicts the index shown beside them.
     return rows
-      .map(({ team, value }) => ({
+      .map(({ team, value, group }) => ({
         ...team,
-        powerIndex: round((value / max) * 100, 1),
-        powerAverage: round(value),
+        score: value,
+        powerIndex: round(powerIndexOf(value, best), 1),
+        powerPoints: round(value, 1),
+        detail: group,
       }))
-      .sort((a, b) => b.powerIndex - a.powerIndex);
-  }, [powerScope, standings, rosterValues]);
+      .sort((a, b) => b.score - a.score);
+  }, [powerScope, standings, powerIndex]);
 
   const weeklyRanks = useMemo(() => {
     const teams = power.map((team) => ({
@@ -424,8 +432,13 @@ export function AnalyticsPage() {
           </div>
           <p id="power-formula" className="sr-only">
             {powerScope === 'ALL'
-              ? "Overall power is the average player Value Score across a team's entire roster, including bench, taxi and reserve. The bar is scaled so the strongest roster reads 100."
-              : `${powerScope} power weights the player Value Scores of the ${powerScope}s a team rosters toward its best ones, so a deep group is not dragged down by a single low-value player. The bar is scaled so the strongest reads 100.`}
+              ? 'Overall power is the points per week a roster is worth above a replacement-level roster, summed over every starting slot the league fields. The bar is scaled so the strongest roster reads 100.'
+              : `${powerScope} power is the points per week a team's ${powerScope}s are worth above replacement across the ${fmtSlots(powerIndex.slotsByGroup.get(powerScope) ?? 0)} this league starts, plus a discounted premium for bench depth behind them. The bar is scaled so the strongest reads 100.`}
+          </p>
+          <p className="card-pad tiny muted" style={{ paddingBottom: 0 }}>
+            {powerScope === 'ALL'
+              ? 'Points per week above a replacement-level roster, across all 21 starting slots.'
+              : `Points per week above replacement from the ${fmtSlots(powerIndex.slotsByGroup.get(powerScope) ?? 0)} this league starts at ${powerScope}, plus bench insurance.`}
           </p>
           <div className="card-pad power-controls">
             <div className="segmented" role="group" aria-label="Power ranking scope">
@@ -479,14 +492,26 @@ export function AnalyticsPage() {
                   </span>
                   <span
                     className="power-value mono bold"
-                    title={
-                      powerScope === 'ALL'
-                        ? `${Math.round(team.powerAverage)} average player value`
-                        : `${Math.round(team.powerAverage)} weighted value of best ${powerScope}s`
-                    }
+                    title={`${fmtSigned(team.powerPoints)} pts/wk above replacement`}
                   >
                     {team.powerIndex.toFixed(1)}
                   </span>
+                  {team.detail && (
+                    <span className="power-why tiny muted">
+                      {team.detail.starters.length > 0
+                        ? team.detail.starters
+                            .map(
+                              (starter) =>
+                                `${playerLabel(data, starter.pid)} ${powerScope} #${starter.rank} (${fmtSigned(starter.vorp)})`,
+                            )
+                            .join(' · ')
+                        : `no ${powerScope} rostered`}
+                      {team.detail.unfilledSlots > 0.01 &&
+                        ` · ${fmtSlots(team.detail.unfilledSlots)} unfilled`}
+                      {team.detail.depthScore > 0.05 &&
+                        ` · +${team.detail.depthScore.toFixed(1)} depth`}
+                    </span>
+                  )}
                 </div>
               );
             })}

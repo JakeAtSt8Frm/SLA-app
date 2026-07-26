@@ -879,7 +879,20 @@
   display: grid;
   grid-template-columns: 24px minmax(112px, 0.45fr) minmax(120px, 1fr) 48px;
   align-items: center;
-  gap: 10px;
+  gap: 10px 10px;
+}
+
+/*
+ * The "why" line spans the full row under the bar. Which players a positional
+ * score is actually made of is the whole answer to "how is this team ranked
+ * first at tight end", so it is on the page rather than in a tooltip.
+ */
+.power-why {
+  grid-column: 2 / -1;
+  margin-top: -4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .power-rank,

@@ -32,20 +32,28 @@ import {
 import { buildValueIndex, type ValueIndex } from '../lib/value';
 import {
   buildDynastyIndex,
+  startingDepthByGroup,
   type DynastyIndex,
-  type ProjectionSource,
+  type ProjectedSeason,
   type SeasonPpg,
   type SeasonProjectionMap,
 } from '../lib/dynasty';
-import { getFftodaySnapshot, matchFftodayProjections } from '../lib/fftoday';
+import {
+  EXTERNAL_SOURCE_NAMES,
+  getProjectionSnapshot,
+  matchProjections,
+  type ProjectionSourceName,
+} from '../lib/projections';
 import { getMarketValues, marketQueryFromLeague } from '../lib/market';
 import { buildMatchupIndex, type MatchupIndex } from '../lib/matchup';
 import { starterSlots } from '../lib/optimal';
+import { POSITION_GROUPS } from '../lib/types';
 import type {
   League,
   Matchup,
   NflState,
   Player,
+  PositionGroup,
   Roster,
   SleeperUser,
   StatLine,
@@ -260,7 +268,7 @@ function summarizeSeasonProjections(
   statsByPlayer: Record<string, StatLine>,
   scoringModel: ScoringModel,
   playersById: Map<string, Player>,
-  sourceName: ProjectionSource['name'],
+  sourceName: ProjectionSourceName,
   updatedAt?: string,
 ): SeasonProjectionMap {
   const NFL_GAMES = 17;
@@ -287,12 +295,16 @@ function summarizeSeasonProjections(
       1,
       Math.min(NFL_GAMES, Number.isFinite(rawGames) ? rawGames : NFL_GAMES),
     );
+    // Zero opportunity in a *forecast* means the source did not publish the
+    // volume columns, not that the player is expected to see none — Sleeper's
+    // season projection carries no field-goal or extra-point attempts at all.
+    // Abstaining keeps that silence out of the ensemble instead of voting zero.
     const usage = opportunities(group, stats);
     projections.set(pid, {
       total,
       ppg: total / games,
       games,
-      usagePerGame: usage === null ? null : usage / games,
+      usagePerGame: usage === null || usage <= 0 ? null : usage / games,
       sources: [
         {
           name: sourceName,
@@ -307,39 +319,171 @@ function summarizeSeasonProjections(
   return projections;
 }
 
+/** A source needs this many players in a group before it can be rescaled. */
+const CALIBRATION_MIN_SAMPLE = 8;
+/** Sanity rails: a factor outside these is a parsing bug, not a house view. */
+const CALIBRATION_LIMITS = { min: 0.5, max: 2 } as const;
+
+function median(sortedDesc: number[]): number {
+  const mid = Math.floor(sortedDesc.length / 2);
+  return sortedDesc.length % 2
+    ? sortedDesc[mid]
+    : (sortedDesc[mid - 1] + sortedDesc[mid]) / 2;
+}
+
+/** Median of a source's top `anchor` players in a group, or null if too thin. */
+function anchorLevel(values: number[], anchor: number): number | null {
+  if (values.length < Math.max(CALIBRATION_MIN_SAMPLE, anchor)) return null;
+  const top = [...values].sort((a, b) => b - a).slice(0, anchor);
+  const level = median(top);
+  return level > 0 ? level : null;
+}
+
 /**
- * Averages independent forecasts instead of summing two descriptions of the
- * same future season. A single available source remains fully usable.
+ * Puts every source on a common per-position scale before they are averaged.
+ *
+ * The sources do not measure the same things. Sleeper's season projection omits
+ * passes defensed entirely — 3 points a piece here — which leaves its defensive
+ * backs about a fifth light against the other two. Its kickers carry no attempt
+ * columns at all. And on usage, FantasySharks publishes targets where FFToday
+ * and Sleeper publish only receptions, so a receiver's "opportunity" differs by
+ * 60% between sources purely by definition.
+ *
+ * Averaged raw, that turns into a bias that depends on *which* sources happen to
+ * cover a player: a deep defensive back only Sleeper lists would sit a fifth
+ * below an identical one all three list, purely as an artefact of coverage.
+ * Since everything downstream is a percentile within the position group, only
+ * each source's *ordering* carries information — so each source is rescaled by a
+ * single positive factor per group, which preserves its ordering exactly while
+ * removing the level disagreement.
+ *
+ * The anchor is the median of a source's top `anchor` players in the group,
+ * which is robust to both a runaway projection at the top and the long tail of
+ * near-zero rows at the bottom. Per-source totals shown in the player sheet stay
+ * as published; only the blend is rescaled.
+ */
+export function calibrateSeasonProjections(
+  sources: SeasonProjectionMap[],
+  groupOf: (pid: string) => PositionGroup | null,
+  anchorByGroup: Map<PositionGroup, number>,
+): SeasonProjectionMap[] {
+  type Levels = Map<PositionGroup, { points: number | null; usage: number | null }>;
+
+  const levelsBySource: Levels[] = sources.map((source) => {
+    const points = new Map<PositionGroup, number[]>();
+    const usage = new Map<PositionGroup, number[]>();
+    const collect = (
+      into: Map<PositionGroup, number[]>,
+      group: PositionGroup,
+      value: number,
+    ) => {
+      const bucket = into.get(group);
+      if (bucket) bucket.push(value);
+      else into.set(group, [value]);
+    };
+
+    for (const [pid, projection] of source) {
+      const group = groupOf(pid);
+      if (!group) continue;
+      collect(points, group, projection.ppg);
+      if (projection.usagePerGame !== null) {
+        collect(usage, group, projection.usagePerGame);
+      }
+    }
+
+    const levels: Levels = new Map();
+    for (const group of POSITION_GROUPS) {
+      const anchor = anchorByGroup.get(group) ?? 0;
+      levels.set(group, {
+        points: anchorLevel(points.get(group) ?? [], anchor),
+        usage: anchorLevel(usage.get(group) ?? [], anchor),
+      });
+    }
+    return levels;
+  });
+
+  // The shared target is the mean of the levels the sources do report, so no
+  // single source defines the scale the others are pulled toward.
+  const reference = new Map<PositionGroup, { points: number | null; usage: number | null }>();
+  for (const group of POSITION_GROUPS) {
+    const mean = (pick: (l: { points: number | null; usage: number | null }) => number | null) => {
+      const values = levelsBySource
+        .map((levels) => pick(levels.get(group)!))
+        .filter((value): value is number => value !== null);
+      return values.length > 1
+        ? values.reduce((sum, value) => sum + value, 0) / values.length
+        : null;
+    };
+    reference.set(group, { points: mean((l) => l.points), usage: mean((l) => l.usage) });
+  }
+
+  const factor = (level: number | null, target: number | null): number => {
+    if (level === null || target === null) return 1;
+    return Math.min(CALIBRATION_LIMITS.max, Math.max(CALIBRATION_LIMITS.min, target / level));
+  };
+
+  return sources.map((source, index) => {
+    const calibrated: SeasonProjectionMap = new Map();
+    for (const [pid, projection] of source) {
+      const group = groupOf(pid);
+      const levels = group ? levelsBySource[index].get(group) : undefined;
+      const target = group ? reference.get(group) : undefined;
+      const points = factor(levels?.points ?? null, target?.points ?? null);
+      const usage = factor(levels?.usage ?? null, target?.usage ?? null);
+      calibrated.set(pid, {
+        ...projection,
+        total: projection.total * points,
+        ppg: projection.ppg * points,
+        usagePerGame:
+          projection.usagePerGame === null ? null : projection.usagePerGame * usage,
+      });
+    }
+    return calibrated;
+  });
+}
+
+/**
+ * Averages independent forecasts instead of summing several descriptions of the
+ * same future season.
+ *
+ * Every source that covers a player gets an equal vote, and a player only one
+ * source covers keeps that source's number in full: the sources disagree most
+ * about exactly the deep IDP and kicker rows where only one of them bothers to
+ * publish, so shrinking a lone forecast toward nothing would throw away the only
+ * evidence there is.
  */
 export function blendSeasonProjections(
-  sleeper: SeasonProjectionMap,
-  fftoday: SeasonProjectionMap,
+  ...sources: SeasonProjectionMap[]
 ): SeasonProjectionMap {
   const blended: SeasonProjectionMap = new Map();
-  const pids = new Set([...sleeper.keys(), ...fftoday.keys()]);
+  const pids = new Set(sources.flatMap((source) => [...source.keys()]));
 
   for (const pid of pids) {
-    const sleeperProjection = sleeper.get(pid);
-    const fftodayProjection = fftoday.get(pid);
-    if (!sleeperProjection || !fftodayProjection) {
-      const available = sleeperProjection ?? fftodayProjection;
-      if (available) blended.set(pid, available);
+    const projections = sources
+      .map((source) => source.get(pid))
+      .filter((projection): projection is ProjectedSeason => projection !== undefined);
+    if (projections.length === 0) continue;
+    if (projections.length === 1) {
+      blended.set(pid, projections[0]);
       continue;
     }
 
-    const usageValues = [
-      sleeperProjection.usagePerGame,
-      fftodayProjection.usagePerGame,
-    ].filter((value): value is number => value !== null);
+    const mean = (pick: (p: ProjectedSeason) => number) =>
+      projections.reduce((sum, projection) => sum + pick(projection), 0) /
+      projections.length;
+    const usageValues = projections
+      .map((projection) => projection.usagePerGame)
+      .filter((value): value is number => value !== null);
+
     blended.set(pid, {
-      total: (sleeperProjection.total + fftodayProjection.total) / 2,
-      ppg: (sleeperProjection.ppg + fftodayProjection.ppg) / 2,
-      games: Math.max(sleeperProjection.games, fftodayProjection.games),
+      total: mean((projection) => projection.total),
+      ppg: mean((projection) => projection.ppg),
+      games: Math.max(...projections.map((projection) => projection.games)),
       usagePerGame:
         usageValues.length > 0
           ? usageValues.reduce((sum, value) => sum + value, 0) / usageValues.length
           : null,
-      sources: [...sleeperProjection.sources, ...fftodayProjection.sources],
+      sources: projections.flatMap((projection) => projection.sources),
     });
   }
 
@@ -533,7 +677,8 @@ export async function loadLeague(
     league.total_rosters,
     league.scoring_settings?.rec,
   );
-  const [priorSeasons, market, sleeperProjectionPayload, fftodaySnapshot] =
+  const isCurrentSeason = nflState.season === season;
+  const [priorSeasons, market, sleeperProjectionPayload, externalSnapshots] =
     await Promise.all([
       Promise.all(
         priorYears.map((year) =>
@@ -543,14 +688,18 @@ export async function loadLeague(
         ),
       ),
       getMarketValues(marketQuery, signal).catch(() => new Map()),
-      nflState.season === season
+      isCurrentSeason
         ? cached(`proj-season:${season}`, TTL.SEASON_PROJECTIONS, () =>
             getSeasonProjections(season, signal),
           ).catch(() => null)
         : Promise.resolve(null),
-      nflState.season === season
-        ? getFftodaySnapshot(season, signal).catch(() => null)
-        : Promise.resolve(null),
+      Promise.all(
+        EXTERNAL_SOURCE_NAMES.map((source) =>
+          isCurrentSeason
+            ? getProjectionSnapshot(source, season, signal).catch(() => null)
+            : Promise.resolve(null),
+        ),
+      ),
     ]);
 
   const sleeperProjections: SeasonProjectionMap = sleeperProjectionPayload
@@ -561,18 +710,34 @@ export async function loadLeague(
         'Sleeper',
       )
     : new Map();
-  const fftodayProjections: SeasonProjectionMap = fftodaySnapshot
-    ? summarizeSeasonProjections(
-        matchFftodayProjections(fftodaySnapshot, playersById),
-        scoringModel,
-        playersById,
-        'FFToday',
-        fftodaySnapshot.updatedAt,
-      )
-    : new Map();
+  const externalProjections = externalSnapshots.map((snapshot) =>
+    snapshot
+      ? summarizeSeasonProjections(
+          matchProjections(snapshot, playersById),
+          scoringModel,
+          playersById,
+          snapshot.source,
+          snapshot.updatedAt,
+        )
+      : (new Map() as SeasonProjectionMap),
+  );
+  const rosterPositions = league.roster_positions ?? [];
+  const numTeams = league.total_rosters ?? rosters.length;
+
+  // Twice the startable depth is a wide enough band to include the
+  // replacement-level players whose scale matters most, and still narrow enough
+  // to exclude each source's long tail of near-zero rows.
+  const anchorByGroup = new Map(
+    [...startingDepthByGroup(rosterPositions, numTeams)].map(
+      ([group, depth]) => [group, Math.max(24, Math.round(depth * 2))] as const,
+    ),
+  );
   const seasonProjections = blendSeasonProjections(
-    sleeperProjections,
-    fftodayProjections,
+    ...calibrateSeasonProjections(
+      [sleeperProjections, ...externalProjections],
+      (pid) => groupForPlayer(playersById.get(pid)),
+      anchorByGroup,
+    ),
   );
 
   const dynastyIndex = buildDynastyIndex({
@@ -581,8 +746,8 @@ export async function loadLeague(
     priorSeasons,
     seasonProjections,
     market,
-    rosterPositions: league.roster_positions ?? [],
-    numTeams: league.total_rosters ?? rosters.length,
+    rosterPositions,
+    numTeams,
     throughWeek: currentWeek,
   });
 

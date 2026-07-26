@@ -29,6 +29,7 @@
 
 import { longevity, resolveAge } from './longevity';
 import type { MarketEntry } from './market';
+import type { ProjectionSourceName } from './projections';
 import { clamp01, percentileRanks, round } from './stats';
 import type { Player, PositionGroup } from './types';
 import type { ValueIndex } from './value';
@@ -149,7 +150,7 @@ export interface ProjectedSeason {
 }
 
 export interface ProjectionSource {
-  name: 'Sleeper' | 'FFToday';
+  name: ProjectionSourceName;
   total: number;
   ppg: number;
   updatedAt?: string;
