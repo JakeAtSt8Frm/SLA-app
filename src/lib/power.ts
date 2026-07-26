@@ -1,15 +1,10 @@
 /**
  * Forward-looking roster power.
  *
- * Power is the custom-scored PPG of a team's best legal projected lineup. The
- * lineup is solved against Sleeper's real slots, so a player can only count
- * once and flex/superflex decisions are made as a single assignment problem.
- *
- * Bench quality is reported separately as the average projected drop when one
- * starter is unavailable. It does not receive an arbitrary bonus in the
- * headline score: two teams with the same starting projection can be compared
- * on resilience without letting a guessed depth weight reorder stronger
- * lineups.
+ * Overall power is the custom-scored PPG of a team's best legal projected
+ * lineup. Positional power is an outlier-resistant average across the whole
+ * rostered position room, so it reflects depth without letting one extreme
+ * projection dominate the result.
  */
 
 import { startingDepthByGroup } from './dynasty';
@@ -20,7 +15,7 @@ import {
   type LineupCandidate,
   type OptimalLineup,
 } from './optimal';
-import { mean } from './stats';
+import { mean, quantile } from './stats';
 import { POSITION_GROUPS, type PositionGroup } from './types';
 
 const DUMMY_PREFIX = '__power_replacement__';
@@ -33,8 +28,6 @@ export interface PowerPlayer {
   rank: number;
   /** Headline Value Score, carried for display. */
   value: number | null;
-  /** Projected lineup loss if this starter alone is unavailable. */
-  absenceDrop: number;
 }
 
 export interface PowerGroup {
@@ -47,9 +40,9 @@ export interface PowerGroup {
   unfilledSlots: number;
   /** Projected PPG contributed by this position in the best legal lineup. */
   starterScore: number;
-  /** Mean projected lineup loss when one starter in this group is unavailable. */
-  depthDrop: number;
-  /** Alias of starterScore used to rank a positional scope. */
+  /** Number of projections outside Tukey's 1.5× IQR fences. */
+  outliersRemoved: number;
+  /** Outlier-resistant average PPG across the rostered position room. */
   score: number;
 }
 
@@ -57,8 +50,6 @@ export interface TeamPower {
   rosterId: number;
   /** Projected PPG of the team's best legal starting lineup. */
   overall: number;
-  /** Mean projected lineup loss when one starter is unavailable. */
-  depthDrop: number;
   byGroup: Record<PositionGroup, PowerGroup>;
 }
 
@@ -103,7 +94,7 @@ function emptyGroup(group: PositionGroup, slots: number): PowerGroup {
     depth: [],
     unfilledSlots: 0,
     starterScore: 0,
-    depthDrop: 0,
+    outliersRemoved: 0,
     score: 0,
   };
 }
@@ -136,6 +127,39 @@ function solve(slots: string[], candidates: LineupCandidate[]): OptimalLineup {
 
 function isRealPlayer(pid: string | null): pid is string {
   return pid !== null && !pid.startsWith(DUMMY_PREFIX);
+}
+
+/**
+ * Tukey's 1.5× IQR rule is conservative for small roster rooms: it removes
+ * only statistically isolated projections rather than trimming the best and
+ * worst player unconditionally. Fewer than four observations are kept intact
+ * because quartiles are not stable enough to label an outlier.
+ */
+export function outlierResistantMean(
+  values: number[],
+  minimumSamples = 0,
+): { average: number; outliersRemoved: number } {
+  const finite = values.filter(Number.isFinite).sort((a, b) => a - b);
+  let included = finite;
+
+  if (finite.length >= 4) {
+    const q1 = quantile(finite, 0.25);
+    const q3 = quantile(finite, 0.75);
+    const iqr = q3 - q1;
+    if (iqr > 0) {
+      const lowerFence = q1 - 1.5 * iqr;
+      const upperFence = q3 + 1.5 * iqr;
+      included = finite.filter((value) => value >= lowerFence && value <= upperFence);
+    }
+  }
+
+  const padded = [...included];
+  while (padded.length < Math.max(0, Math.ceil(minimumSamples))) padded.push(0);
+
+  return {
+    average: mean(padded),
+    outliersRemoved: finite.length - included.length,
+  };
 }
 
 export function buildPowerIndex(input: BuildPowerIndexInput): PowerIndex {
@@ -177,7 +201,7 @@ export function buildPowerIndex(input: BuildPowerIndexInput): PowerIndex {
   for (const [group, bucket] of rostered) {
     const ladder = bucket
       .sort((a, b) => b.projectedPpg - a.projectedPpg || a.pid.localeCompare(b.pid))
-      .map((entry, index) => ({ ...entry, rank: index + 1, absenceDrop: 0 }));
+      .map((entry, index) => ({ ...entry, rank: index + 1 }));
     for (const entry of ladder) rankByPid.set(entry.pid, entry.rank);
     ladderByGroup.set(group, ladder);
   }
@@ -195,7 +219,6 @@ export function buildPowerIndex(input: BuildPowerIndexInput): PowerIndex {
         projectedPpg: Math.max(0, player.projectedPpg),
         value: player.value,
         rank: rankByPid.get(pid) ?? 0,
-        absenceDrop: 0,
       }];
     });
     const playerByPid = new Map(held.map((player) => [player.pid, player]));
@@ -207,12 +230,6 @@ export function buildPowerIndex(input: BuildPowerIndexInput): PowerIndex {
     const optimal = solve(slots, candidates);
     const starterIds = new Set(optimal.assignments.map((row) => row.pid).filter(isRealPlayer));
 
-    const absenceDropByPid = new Map<string, number>();
-    for (const pid of starterIds) {
-      const fallback = solve(slots, candidates.filter((candidate) => candidate.pid !== pid));
-      absenceDropByPid.set(pid, Math.max(0, optimal.total - fallback.total));
-    }
-
     const byGroup = {} as Record<PositionGroup, PowerGroup>;
     for (const group of POSITION_GROUPS) {
       byGroup[group] = emptyGroup(group, slotsByGroup.get(group) ?? 0);
@@ -223,13 +240,8 @@ export function buildPowerIndex(input: BuildPowerIndexInput): PowerIndex {
         const player = playerByPid.get(assignment.pid);
         const group = players.get(assignment.pid)?.group;
         if (!player || !group) continue;
-        const starter = {
-          ...player,
-          absenceDrop: absenceDropByPid.get(player.pid) ?? 0,
-        };
-        byGroup[group].starters.push(starter);
-        byGroup[group].starterScore += starter.projectedPpg;
-        byGroup[group].score += starter.projectedPpg;
+        byGroup[group].starters.push(player);
+        byGroup[group].starterScore += player.projectedPpg;
       } else {
         byGroup[dummyGroupForSlot(assignment.slot)].unfilledSlots += 1;
       }
@@ -248,15 +260,19 @@ export function buildPowerIndex(input: BuildPowerIndexInput): PowerIndex {
       byGroup[group].depth.sort(
         (a, b) => b.projectedPpg - a.projectedPpg || a.pid.localeCompare(b.pid),
       );
-      byGroup[group].depthDrop = mean(
-        byGroup[group].starters.map((player) => player.absenceDrop),
+      const room = outlierResistantMean(
+        [...byGroup[group].starters, ...byGroup[group].depth].map(
+          (player) => player.projectedPpg,
+        ),
+        byGroup[group].slots,
       );
+      byGroup[group].score = room.average;
+      byGroup[group].outliersRemoved = room.outliersRemoved;
     }
 
     byTeam.set(roster.rosterId, {
       rosterId: roster.rosterId,
       overall: optimal.total,
-      depthDrop: mean([...starterIds].map((pid) => absenceDropByPid.get(pid) ?? 0)),
       byGroup,
     });
   }
