@@ -3,8 +3,9 @@
 A fantasy football analytics app for the **Neighbas in Paris** Sleeper league,
 built around the league's own custom scoring rather than any standard format.
 
-Static site. No backend, no API keys, no build-time secrets — everything runs in
-the browser against Sleeper's public, CORS-enabled API.
+Static site. No backend, API keys or build-time secrets. League data loads in
+the browser from Sleeper; a public FFToday projection snapshot is refreshed by
+the Pages build because FFToday does not allow browser cross-origin requests.
 
 ## Why custom scoring is the whole point
 
@@ -59,8 +60,11 @@ comparable across positions.
 
 - *Dynasty half* answers "what should this player be worth to hold". Its lead
   signal is multi-year **VORP** — observed production blended across the current
-  and prior two seasons, plus Sleeper's current full-season stat projection
-  scored in *this* league's format. The projection is 40% of the production
+  and prior two seasons, plus the average of Sleeper and
+  [FFToday](https://www.fftoday.com/rankings/playerproj.php?PosID=10&LeagueID=193033)
+  full-season stat projections, each independently scored in *this* league's
+  format. When only one source covers a player, that source remains usable. The
+  ensemble projection is 40% of the production
   blend before a player records a game and fades to 15% after six games; it is
   never added to actual points. VORP then subtracts the group's real replacement
   level from the league's actual superflex/IDP starting requirements. On top of
@@ -151,6 +155,10 @@ npm run build
 
 Pushing to `main` deploys via GitHub Actions (`.github/workflows/deploy.yml`).
 Enable it once under **Settings → Pages → Source → GitHub Actions**.
+
+The same workflow refreshes the FFToday snapshot daily. Run
+`npm run refresh:fftoday` before a local build when you want the latest source
+data; the repository snapshot is retained as a fallback if FFToday is down.
 
 The build uses a relative base path and a `HashRouter`, so it works from a
 project page (`/SLA/`), a user page (`/`), or straight off disk — no server
