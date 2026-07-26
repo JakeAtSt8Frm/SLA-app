@@ -54,7 +54,8 @@ export function PlayerModal({ pid, week, onClose }: Props) {
     const value = data.valueIndex.byPlayer.get(pid) ?? null;
     const dynasty = data.dynastyIndex.byPlayer.get(pid) ?? null;
     const weekly = data.valueIndex.weeklyScores.get(pid) ?? [];
-    const matchup = data.matchupIndex.get(player.group, player.opponent, player.team);
+    const matchupIndex = data.pregameMatchupIndexes.get(week) ?? data.matchupIndex;
+    const matchup = matchupIndex.get(player.group, player.opponent);
 
     const chart = weekly.map((w) => ({
       week: `W${w.week}`,
@@ -380,9 +381,14 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                   value={String(matchup.score)}
                 />
                 <Metric label="Defence baseline" value={String(matchup.baseScore)} />
-                {matchup.unitStrengthScore !== null && (
-                  <Metric label="Unit strength" value={String(matchup.unitStrengthScore)} />
-                )}
+                <Metric
+                  label="Adjusted-allowed score"
+                  value={String(matchup.opponentAdjustedScore)}
+                />
+                <Metric
+                  label="Opportunity score"
+                  value={String(matchup.opportunityScore)}
+                />
                 <Metric
                   label="Allowed / game"
                   value={fmt1(matchup.pointsPerGame)}

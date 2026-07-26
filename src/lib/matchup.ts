@@ -19,10 +19,10 @@
  *   consistency   inverse volatility — predictable defences are easier to trust
  *   top-10 bonus  how often it yields a leaguewide top-10 week at the position
  *
- * A player-facing lookup then adds the factors that proved predictive across
- * the 2024 discovery season and 2025 holdout: schedule-adjusted concessions,
- * opportunity volume allowed, and the strength of the attacking/IDP unit
- * entering the matchup.
+ * A player-facing lookup uses the two opponent-controlled signals that held up
+ * against player projection residuals across 2023–2025: schedule-adjusted
+ * concessions and opportunity volume allowed. Player/team strength is
+ * deliberately excluded because it describes the player, not the matchup.
  */
 
 import {
@@ -48,16 +48,14 @@ export interface MatchupBreakdown {
 export interface MatchupEntry {
   defense: string;
   group: PositionGroup;
-  /** 0–100. Higher = a more favorable contextual matchup for this unit. */
+  /** 0–100. Higher = more opportunity and adjusted production allowed. */
   score: number;
-  /** Defence-only score before the attacking unit is considered. */
+  /** Full defence-generosity composite used by the Analytics table. */
   baseScore: number;
   /** Percentile of schedule-adjusted points allowed. */
   opponentAdjustedScore: number;
   /** Percentile of opportunity volume allowed. */
   opportunityScore: number;
-  /** Attacking/IDP unit strength percentile used by contextual lookups. */
-  unitStrengthScore: number | null;
   /**
    * The unnormalised component sum, before rescaling.
    *
@@ -89,7 +87,6 @@ export interface MatchupIndex {
   get(
     group: PositionGroup | null,
     defense: string | null | undefined,
-    sourceTeam?: string | null,
   ): MatchupEntry | null;
 }
 
@@ -105,8 +102,15 @@ export interface BuildMatchupIndexInput {
   throughWeek: number;
 }
 
+export type MatchupHistoryInput = Omit<BuildMatchupIndexInput, 'throughWeek'>;
+
 /** How many weekly performances count as "top N" for the top-10 bonus. */
 const TOP_N = 10;
+/** Player-facing matchup weights selected on leakage-safe player-week residuals. */
+export const PLAYER_MATCHUP_WEIGHTS = {
+  opponentAdjusted: 0.6,
+  opportunity: 0.4,
+} as const;
 
 export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
   const { scoringModel, playersById, weekStats, weekOpponents, weekTeams, throughWeek } = input;
@@ -232,14 +236,12 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
   // ---- Convert raw concessions into 0–100 ratings --------------------------
 
   const byGroup = new Map<PositionGroup, Map<string, MatchupEntry>>();
-  const unitStrengthScoresByGroup = new Map<PositionGroup, Map<string, number>>();
   const defenseSet = new Set<string>();
 
   for (const group of POSITION_GROUPS) {
     const perDefense = weeklyTotals.get(group)!;
     if (!perDefense.size) {
       byGroup.set(group, new Map());
-      unitStrengthScoresByGroup.set(group, new Map());
       continue;
     }
 
@@ -249,8 +251,6 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
         value: mean([...totals.values()]),
       }),
     );
-    unitStrengthScoresByGroup.set(group, percentileRanks(teamStrengthRows));
-
     const allWeeklyTotals = [...perDefense.values()].flatMap((weekMap) => [
       ...weekMap.values(),
     ]);
@@ -403,7 +403,6 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
         baseScore: round(total, 1),
         opponentAdjustedScore: round(opponentAdjustedScore, 1),
         opportunityScore: round(opportunityScore, 1),
-        unitStrengthScore: null,
         rawComposite: round(composite.value, 1),
         pointsPerGame: round(r.ppg),
         opponentAdjustedPpg: round(r.opponentAdjustedPpg),
@@ -427,33 +426,41 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
     byGroup,
     throughWeek,
     defenses: [...defenseSet].sort(),
-    get(group, defense, sourceTeam) {
+    get(group, defense) {
       if (!group || !defense) return null;
       const entry = byGroup.get(group)?.get(String(defense).toUpperCase()) ?? null;
-      if (!entry || !sourceTeam) return entry;
-
-      const unitStrength =
-        unitStrengthScoresByGroup.get(group)?.get(String(sourceTeam).toUpperCase()) ?? null;
-      if (unitStrength === null) return entry;
-
-      /*
-       * Cross-season holdout weights:
-       *   35% existing defence composite
-       *   15% opponent-adjusted concessions
-       *   10% opportunity volume allowed
-       *   40% strength of the unit entering the matchup
-       */
-      const contextualScore =
-        entry.baseScore * 0.35 +
-        entry.opponentAdjustedScore * 0.15 +
-        entry.opportunityScore * 0.1 +
-        unitStrength * 100 * 0.4;
+      if (!entry) return null;
+      const playerScore =
+        entry.opponentAdjustedScore * PLAYER_MATCHUP_WEIGHTS.opponentAdjusted +
+        entry.opportunityScore * PLAYER_MATCHUP_WEIGHTS.opportunity;
 
       return {
         ...entry,
-        score: round(clamp(contextualScore, 0, 100), 1),
-        unitStrengthScore: round(unitStrength * 100, 1),
+        score: round(clamp(playerScore, 0, 100), 1),
       };
     },
   };
+}
+
+/**
+ * Builds the rating that was knowable before each historical week.
+ *
+ * A season-wide index is appropriate for today's Analytics table, but using it
+ * on Week 4 would leak Week 4 and all later results into that player's chip.
+ */
+export function buildPregameMatchupIndexes(
+  input: MatchupHistoryInput,
+  maxWeek: number,
+): Map<number, MatchupIndex> {
+  const indexes = new Map<number, MatchupIndex>();
+  for (let week = 1; week <= maxWeek; week++) {
+    indexes.set(
+      week,
+      buildMatchupIndex({
+        ...input,
+        throughWeek: week - 1,
+      }),
+    );
+  }
+  return indexes;
 }

@@ -83,16 +83,20 @@ input is best-effort: a failed market or prior-season fetch degrades that half
 gracefully rather than blocking the app, and a player with only one half carries
 that half as his Value Score.
 
-**Matchup Score (0–100)** — a contextual next-week rating. It combines the
-defence-only generosity model (.35), opponent-adjusted concessions (.15),
-opportunity volume allowed (.10), and the historical strength of the player's
-offensive or IDP unit (.40). The Analytics page keeps the defence-only view so
-teams remain directly comparable; player-facing scores include the unit context.
+**Matchup Score (0–100)** — an opponent-only next-week rating. It blends
+schedule-adjusted custom points allowed (.60) with opportunity volume allowed
+(.40). Player and unit strength are deliberately excluded: those describe how
+good the player is, not whether the defence provides an advantage. The
+Analytics page retains the fuller defence-generosity profile for league-wide
+comparison.
 
-The weights were selected on leakage-safe 2024 observations and evaluated once
-on a 2025 holdout. Value's next-week rank correlation improved from .610 to
-.653; contextual matchup correlation improved from .088 to .235. Run
-`npm run research` to reproduce the full signal report.
+The leakage-safe 2023–2025 backtest covers 42,033 player-weeks and evaluates
+whether a matchup predicts performance above Sleeper's pregame projection. The
+new opponent-only score improved rank correlation from .028 to .043 in 2024 and
+from .005 to .022 in 2025. That is a real but modest edge, so Matchup remains a
+tiebreaker rather than a substitute for Value or projected points. Historical
+weeks use only results that were available before that game. Run `npm run
+research` to reproduce the report.
 
 ## Projection sources
 
@@ -207,6 +211,8 @@ These are deliberate corrections, not drift:
   100 and got clipped — in 2025 three defences tied at exactly 100.0 against QBs
   and two sat at 0.0, destroying the ordering exactly where it mattered. Scores
   are now the composite's rank-percentile, giving a full spread.
+- **Historical matchup scores are pregame-only.** A Week 4 player no longer
+  receives a defence rating built with Week 4 and future results.
 - **Heatmaps normalise around the league median.** The red→yellow→green scale is
   kept from the original, but centred on the median rather than the min, so
   yellow honestly means "typical" even when one team has a runaway week.
