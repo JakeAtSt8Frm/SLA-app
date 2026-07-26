@@ -12,6 +12,7 @@
     "research": "tsx scripts/research-models.ts",
     "verify": "tsx scripts/verify-scoring.ts",
     "verify:dynasty": "tsx scripts/verify-dynasty-projections.ts",
+    "verify:roster": "tsx scripts/verify-roster-slots.ts",
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
