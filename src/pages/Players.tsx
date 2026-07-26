@@ -9,7 +9,7 @@
 
 import { useDeferredValue, useMemo, useState } from 'react';
 import { useLeagueData } from '../data/LeagueProvider';
-import { enrichPlayer, rosteredIds } from '../data/selectors';
+import { enrichPlayer, rosterOwnerByPlayer } from '../data/selectors';
 import { PlayerRow } from '../components/PlayerRow';
 import { PlayerModal } from '../components/PlayerModal';
 import { EmptyState } from '../components/primitives';
@@ -22,6 +22,7 @@ export function PlayersPage() {
   const data = useLeagueData();
   const [group, setGroup] = useState<PositionGroup | 'ALL'>('ALL');
   const [availability, setAvailability] = useState<Availability>('free');
+  const [rosterId, setRosterId] = useState<number | 'ALL'>('ALL');
   const [sort, setSort] = useState<SortKey>('value');
   const [query, setQuery] = useState('');
   const [openPid, setOpenPid] = useState<string | null>(null);
@@ -29,17 +30,7 @@ export function PlayersPage() {
   // Keeps typing responsive while the list re-filters.
   const deferredQuery = useDeferredValue(query);
 
-  const owned = useMemo(() => rosteredIds(data), [data]);
-
-  const ownerByPid = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const team of data.teams) {
-      for (const pid of team.roster.players ?? []) {
-        if (pid) map.set(String(pid), team.name);
-      }
-    }
-    return map;
-  }, [data]);
+  const ownerByPid = useMemo(() => rosterOwnerByPlayer(data.teams), [data]);
 
   const results = useMemo(() => {
     const needle = deferredQuery.trim().toLowerCase();
@@ -51,9 +42,11 @@ export function PlayersPage() {
       const playerGroup = value?.group ?? dynasty?.group ?? null;
       if (!playerGroup || (group !== 'ALL' && playerGroup !== group)) continue;
 
-      const isOwned = owned.has(pid);
+      const owner = ownerByPid.get(pid) ?? null;
+      const isOwned = owner !== null;
       if (availability === 'free' && isOwned) continue;
       if (availability === 'rostered' && !isOwned) continue;
+      if (rosterId !== 'ALL' && owner?.rosterId !== rosterId) continue;
 
       if (needle) {
         const player = data.playersById.get(pid);
@@ -88,9 +81,9 @@ export function PlayersPage() {
     // past the first hundred.
     return rows.slice(0, 150).map((r) => ({
       player: enrichPlayer(data, r.pid, data.currentWeek, '', false),
-      owner: ownerByPid.get(r.pid) ?? null,
+      owner: ownerByPid.get(r.pid)?.name ?? null,
     }));
-  }, [data, group, availability, sort, deferredQuery, owned, ownerByPid]);
+  }, [data, group, availability, rosterId, sort, deferredQuery, ownerByPid]);
 
   return (
     <>
@@ -110,16 +103,31 @@ export function PlayersPage() {
         />
 
         <div className="segmented" role="group" aria-label="Availability">
-          <button aria-pressed={availability === 'free'} onClick={() => setAvailability('free')}>
+          <button
+            aria-pressed={availability === 'free'}
+            onClick={() => {
+              setAvailability('free');
+              setRosterId('ALL');
+            }}
+          >
             Free agents
           </button>
           <button
             aria-pressed={availability === 'rostered'}
-            onClick={() => setAvailability('rostered')}
+            onClick={() => {
+              setAvailability('rostered');
+              setRosterId('ALL');
+            }}
           >
             Rostered
           </button>
-          <button aria-pressed={availability === 'all'} onClick={() => setAvailability('all')}>
+          <button
+            aria-pressed={availability === 'all'}
+            onClick={() => {
+              setAvailability('all');
+              setRosterId('ALL');
+            }}
+          >
             All
           </button>
         </div>
@@ -156,10 +164,30 @@ export function PlayersPage() {
         </div>
       </div>
 
+      <div className="filters">
+        <div className="segmented" role="group" aria-label="Fantasy team">
+          <button aria-pressed={rosterId === 'ALL'} onClick={() => setRosterId('ALL')}>
+            All fantasy teams
+          </button>
+          {data.teams.map((team) => (
+            <button
+              key={team.rosterId}
+              aria-pressed={rosterId === team.rosterId}
+              onClick={() => {
+                setAvailability('rostered');
+                setRosterId(team.rosterId);
+              }}
+            >
+              {team.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {results.length === 0 ? (
         <EmptyState
           title="No players match"
-          hint="Try a different position group or clear the search."
+          hint="Try a different fantasy team, position group, or clear the search."
         />
       ) : (
         <section className="card" style={{ overflow: 'hidden' }}>
