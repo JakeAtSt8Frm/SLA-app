@@ -2,14 +2,15 @@
  * Regression checks for the forward-looking power model.
  *
  * These tests pin observable rules rather than tuning constants: use the
- * league's exact legal lineup, count each player once, rank on projected custom
- * PPG, and keep bench resilience separate from the headline score.
+ * league's exact legal lineup for overall power, count each player once, and
+ * use an outlier-resistant whole-room average for positional power.
  */
 
 import assert from 'node:assert/strict';
 
 import {
   buildPowerIndex,
+  outlierResistantMean,
   powerIndexOf,
   type PowerPlayerInput,
 } from '../src/lib/power';
@@ -50,7 +51,7 @@ assert.equal(
 assert.equal(empty.slotsByGroup.get('K'), 1);
 
 /* -------------------------------------------------------------------------- */
-/* One TE slot: the best projected starter leads                              */
+/* Positional scope averages the whole room, not only the starter             */
 /* -------------------------------------------------------------------------- */
 
 const TE_ROSTERS: Record<string, Array<[string, number]>> = {
@@ -81,7 +82,7 @@ const teOrder = [...te.byTeam.values()]
   .sort((a, b) => b.byGroup.TE.score - a.byGroup.TE.score)
   .map((team) => team.rosterId);
 
-assert.equal(teOrder[0], teamIdByName.get('rbeans26'));
+assert.equal(teOrder[0], teamIdByName.get('larv'));
 assert.equal(teOrder[1], teamIdByName.get('jake'));
 assert.equal(teOrder[teOrder.length - 1], teamIdByName.get('sam'));
 
@@ -90,7 +91,31 @@ assert.equal(rbeansTe.starters.length, 1, 'One TE slot means one starter counts'
 assert.equal(rbeansTe.starters[0].pid, 'mcbride');
 assert.equal(rbeansTe.starters[0].rank, 1);
 assert.equal(rbeansTe.depth.length, 3);
-assert.equal(rbeansTe.score, 16.5, 'Backup quantity does not inflate projected lineup PPG');
+assert.equal(
+  Number(rbeansTe.score.toFixed(3)),
+  10.575,
+  'Positional power averages the full room rather than taking only McBride',
+);
+
+/* -------------------------------------------------------------------------- */
+/* Statistical outliers are removed conservatively                            */
+/* -------------------------------------------------------------------------- */
+
+assert.deepEqual(
+  outlierResistantMean([40, 10, 10, 10]),
+  { average: 10, outliersRemoved: 1 },
+  'One isolated high projection must not control the room average',
+);
+assert.deepEqual(
+  outlierResistantMean([20, 18, 17, 1]),
+  { average: 55 / 3, outliersRemoved: 1 },
+  'One isolated low projection must not sink the room average',
+);
+assert.deepEqual(
+  outlierResistantMean([20, 18, 17]),
+  { average: 55 / 3, outliersRemoved: 0 },
+  'A three-player room is too small for reliable outlier removal',
+);
 
 /* -------------------------------------------------------------------------- */
 /* The legal lineup is optimized globally, including flex                     */
@@ -149,7 +174,7 @@ assert.equal(unrated.byTeam.get(1)!.byGroup.DL.starters.length, 0);
 assert.equal(unrated.byTeam.get(1)!.byGroup.DL.unfilledSlots, 1);
 
 /* -------------------------------------------------------------------------- */
-/* Depth is measured as resilience and cannot secretly reorder starter power  */
+/* Depth changes positional strength without changing the starting projection */
 /* -------------------------------------------------------------------------- */
 
 const depth = buildPowerIndex({
@@ -168,11 +193,27 @@ const depth = buildPowerIndex({
 });
 assert.equal(depth.byTeam.get(1)!.overall, 16);
 assert.equal(depth.byTeam.get(2)!.overall, 16);
-assert.equal(depth.byTeam.get(1)!.depthDrop, 2);
-assert.equal(depth.byTeam.get(2)!.depthDrop, 8);
+assert.equal(depth.byTeam.get(1)!.byGroup.TE.score, 15);
+assert.equal(depth.byTeam.get(2)!.byGroup.TE.score, 12);
 
 /* -------------------------------------------------------------------------- */
-/* Every positional contribution adds back to the exact projected total       */
+/* Missing positional depth is represented instead of inflating a thin room   */
+/* -------------------------------------------------------------------------- */
+
+const thinRoom = buildPowerIndex({
+  rosters: [{ rosterId: 1, playerIds: ['rb1'] }],
+  players: new Map<string, PowerPlayerInput>([['rb1', player('RB', 20)]]),
+  rosterPositions: ['RB', 'RB', 'RB'],
+  numTeams: 1,
+});
+assert.equal(
+  Number(thinRoom.byTeam.get(1)!.byGroup.RB.score.toFixed(3)),
+  6.667,
+  'One running back cannot masquerade as a complete three-starter room',
+);
+
+/* -------------------------------------------------------------------------- */
+/* Overall remains the exact legal projected lineup                           */
 /* -------------------------------------------------------------------------- */
 
 const full = buildPowerIndex({
@@ -187,7 +228,7 @@ const full = buildPowerIndex({
   numTeams: 1,
 });
 const positionalTotal = (['QB', 'RB', 'WR', 'TE', 'K', 'DL', 'LB', 'DB'] as PositionGroup[])
-  .reduce((sum, group) => sum + full.byTeam.get(1)!.byGroup[group].score, 0);
+  .reduce((sum, group) => sum + full.byTeam.get(1)!.byGroup[group].starterScore, 0);
 assert.equal(full.byTeam.get(1)!.overall, 69);
 assert.equal(positionalTotal, full.byTeam.get(1)!.overall);
 

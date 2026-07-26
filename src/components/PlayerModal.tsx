@@ -129,12 +129,6 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                 </span>
               )}
             </div>
-            {value && dynasty && (
-              <div className="tiny muted" style={{ marginTop: 4 }}>
-                Value {p.valueScore} = average of in-season form {value.score} and dynasty{' '}
-                {dynasty.score}
-              </div>
-            )}
           </div>
           <button className="btn btn-ghost btn-sm" onClick={onClose} aria-label="Close">
             ✕

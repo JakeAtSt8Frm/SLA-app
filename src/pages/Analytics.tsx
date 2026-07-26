@@ -5,7 +5,6 @@
 
 import { useMemo, useState } from 'react';
 import { useLeague, useLeagueData } from '../data/LeagueProvider';
-import type { LeagueData } from '../data/league';
 import { buildRosterWeek } from '../data/selectors';
 import {
   EmptyState,
@@ -31,21 +30,6 @@ interface AllPlayRecord {
 }
 
 type PowerScope = 'ALL' | PositionGroup;
-
-/** "3 slots" / "1 slot" / "1.5 slots" — flex slots split fractionally. */
-function fmtSlots(slots: number): string {
-  const rounded = Math.round(slots * 100) / 100;
-  return `${rounded} ${rounded === 1 ? 'slot' : 'slots'}`;
-}
-
-/** Surname only: the power row has one line and six teams' worth of starters. */
-function playerLabel(data: LeagueData, pid: string): string {
-  const player = data.playersById.get(pid);
-  const name = player?.full_name ?? [player?.first_name, player?.last_name].filter(Boolean).join(' ');
-  if (!name) return pid;
-  const parts = name.split(' ');
-  return parts.length > 1 ? parts.slice(1).join(' ') : name;
-}
 
 export function AnalyticsPage() {
   const data = useLeagueData();
@@ -196,9 +180,6 @@ export function AnalyticsPage() {
       return {
         team,
         value: powerScope === 'ALL' ? (teamPower?.overall ?? 0) : (group?.score ?? 0),
-        depthDrop:
-          powerScope === 'ALL' ? (teamPower?.depthDrop ?? 0) : (group?.depthDrop ?? 0),
-        group,
       };
     });
     const best = Math.max(0, ...rows.map((row) => row.value));
@@ -207,15 +188,13 @@ export function AnalyticsPage() {
     // point apart round to the same tenth and would otherwise be listed in an
     // order that contradicts the index shown beside them.
     return rows
-      .map(({ team, value, depthDrop, group }) => ({
+      .map(({ team, value }) => ({
         ...team,
         score: value,
         powerIndex: round(powerIndexOf(value, best), 1),
         powerPoints: round(value, 1),
-        depthDrop: round(depthDrop, 1),
-        detail: group,
       }))
-      .sort((a, b) => b.score - a.score || a.depthDrop - b.depthDrop);
+      .sort((a, b) => b.score - a.score || a.rosterId - b.rosterId);
   }, [powerScope, standings, powerIndex]);
 
   const weeklyRanks = useMemo(() => {
@@ -428,18 +407,18 @@ export function AnalyticsPage() {
           <div className="group-head group-head--primary">
             <span>Power rankings</span>
             <span className="mono">
-              {powerScope === 'ALL' ? 'Overall · projected PPG' : `${powerScope} · PPG`}
+              {powerScope === 'ALL' ? 'Overall · projected PPG' : `${powerScope} · robust avg`}
             </span>
           </div>
           <p id="power-formula" className="sr-only">
             {powerScope === 'ALL'
               ? 'Overall power is the custom-scored projected points per game of each roster’s best legal starting lineup. The bar is scaled so the strongest roster reads 100.'
-              : `${powerScope} power is the custom-scored projected points per game contributed by a team’s ${powerScope}s in its best legal lineup. The bar is scaled so the strongest reads 100.`}
+              : `${powerScope} power is the outlier-resistant average custom-scored projection across every rostered ${powerScope}. The bar is scaled so the strongest reads 100.`}
           </p>
           <p className="card-pad tiny muted" style={{ paddingBottom: 0 }}>
             {powerScope === 'ALL'
-              ? 'Best legal projected lineup in custom-scored PPG. Depth is shown as the average drop if one starter is unavailable; it does not receive a subjective bonus.'
-              : `Projected PPG from ${powerScope}s assigned to the best legal lineup (${fmtSlots(powerIndex.slotsByGroup.get(powerScope) ?? 0)} expected slots per team).`}
+              ? 'Best legal projected lineup in custom-scored PPG.'
+              : `Average projected PPG across the full ${powerScope} room after excluding statistical outliers.`}
           </p>
           <div className="card-pad power-controls">
             <div className="segmented" role="group" aria-label="Power ranking scope">
@@ -496,26 +475,6 @@ export function AnalyticsPage() {
                     title={`${team.powerPoints.toFixed(1)} projected points per game`}
                   >
                     {team.powerPoints.toFixed(1)}
-                  </span>
-                  <span className="power-why tiny muted">
-                    {team.detail ? (
-                      <>
-                        {team.detail.starters.length > 0
-                          ? team.detail.starters
-                              .map(
-                                (starter) =>
-                                  `${playerLabel(data, starter.pid)} ${powerScope} #${starter.rank} (${starter.projectedPpg.toFixed(1)})`,
-                              )
-                              .join(' · ')
-                          : `no ${powerScope} rostered`}
-                        {team.detail.unfilledSlots > 0.01 &&
-                          ` · ${fmtSlots(team.detail.unfilledSlots)} unfilled`}
-                      </>
-                    ) : (
-                      'Best legal lineup'
-                    )}
-                    {team.depthDrop > 0.05 &&
-                      ` · avg starter absence −${team.depthDrop.toFixed(1)} PPG`}
                   </span>
                 </div>
               );

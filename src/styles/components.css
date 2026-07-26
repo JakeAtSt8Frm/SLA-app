@@ -882,19 +882,6 @@
   gap: 10px 10px;
 }
 
-/*
- * The "why" line spans the full row under the bar. Which players a positional
- * score is actually made of is the whole answer to "how is this team ranked
- * first at tight end", so it is on the page rather than in a tooltip.
- */
-.power-why {
-  grid-column: 2 / -1;
-  margin-top: -4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .power-rank,
 .power-value {
   font-variant-numeric: tabular-nums;
@@ -968,4 +955,3 @@
     gap: 7px 10px;
   }
 }
-
