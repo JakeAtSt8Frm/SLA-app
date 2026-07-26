@@ -202,14 +202,11 @@ async function main() {
     weekTeams,
     throughWeek: WEEKS,
   });
-  const sourceTeams = new Set([...weekTeams.values()].flatMap((teams) => Object.values(teams)));
   const contextualExample = [...matchupIndex.byGroup.entries()]
     .flatMap(([group, entries]) =>
-      [...entries.values()].flatMap((entry) =>
-        [...sourceTeams].map((sourceTeam) => matchupIndex.get(group, entry.defense, sourceTeam)),
-      ),
+      [...entries.values()].map((entry) => matchupIndex.get(group, entry.defense)),
     )
-    .find((entry) => entry?.unitStrengthScore !== null);
+    .find((entry) => entry !== null);
   if (
     !contextualExample ||
     !Number.isFinite(contextualExample.score) ||

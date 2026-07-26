@@ -79,6 +79,7 @@ const data = {
   },
   combinedScores: new Map(),
   matchupIndex: { get: () => null },
+  pregameMatchupIndexes: new Map(),
 } as unknown as LeagueData;
 
 const rosterWeek = buildRosterWeek(data, team.rosterId, 1);

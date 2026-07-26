@@ -45,7 +45,11 @@ import {
   type ProjectionSourceName,
 } from '../lib/projections';
 import { getMarketValues, marketQueryFromLeague } from '../lib/market';
-import { buildMatchupIndex, type MatchupIndex } from '../lib/matchup';
+import {
+  buildMatchupIndex,
+  buildPregameMatchupIndexes,
+  type MatchupIndex,
+} from '../lib/matchup';
 import { starterSlots } from '../lib/optimal';
 import { POSITION_GROUPS } from '../lib/types';
 import type {
@@ -158,7 +162,10 @@ export interface LeagueData {
    * when a player carries only one.
    */
   combinedScores: Map<string, number>;
+  /** Current defence ratings, built through the latest completed week. */
   matchupIndex: MatchupIndex;
+  /** Pregame ratings for historical weeks, containing earlier results only. */
+  pregameMatchupIndexes: Map<number, MatchupIndex>;
 }
 
 export interface LoadProgress {
@@ -665,6 +672,16 @@ export async function loadLeague(
     weekTeams,
     throughWeek: currentWeek,
   });
+  const pregameMatchupIndexes = buildPregameMatchupIndexes(
+    {
+      scoringModel,
+      playersById,
+      weekStats,
+      weekOpponents,
+      weekTeams,
+    },
+    maxWeek,
+  );
 
   report('Loading dynasty inputs', 2, 3);
 
@@ -789,6 +806,7 @@ export async function loadLeague(
     dynastyIndex,
     combinedScores,
     matchupIndex,
+    pregameMatchupIndexes,
   };
 }
 

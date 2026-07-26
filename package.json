@@ -15,6 +15,7 @@
     "research": "tsx scripts/research-models.ts",
     "verify": "tsx scripts/verify-scoring.ts",
     "verify:dynasty": "tsx scripts/verify-dynasty-projections.ts",
+    "verify:matchup": "tsx scripts/verify-matchup.ts",
     "verify:projections": "tsx scripts/verify-projections.ts",
     "verify:ownership": "tsx scripts/verify-player-ownership.ts",
     "verify:power": "tsx scripts/verify-power.ts",

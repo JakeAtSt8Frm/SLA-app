@@ -253,8 +253,9 @@ export function SchedulePage() {
                 key={game.game_id}
                 game={game}
                 playersByTeam={playersByTeam}
-                matchupFor={(defense, group, sourceTeam) =>
-                  data.matchupIndex.get(group, defense, sourceTeam)?.score ?? null
+                matchupFor={(defense, group) =>
+                  (data.pregameMatchupIndexes.get(week) ?? data.matchupIndex)
+                    .get(group, defense)?.score ?? null
                 }
                 onSelect={setOpenPid}
                 highlightOwner={onlyMine ? selectedTeamName : undefined}
@@ -284,7 +285,7 @@ function GameCard({
 }: {
   game: Game;
   playersByTeam: Map<string, GamePlayer[]>;
-  matchupFor: (defense: string, group: PositionGroup, sourceTeam: string) => number | null;
+  matchupFor: (defense: string, group: PositionGroup) => number | null;
   onSelect: (pid: string) => void;
   highlightOwner?: string;
 }) {
@@ -370,7 +371,7 @@ function TeamSide({
   opponent: string;
   players: GamePlayer[];
   total: number;
-  matchupFor: (defense: string, group: PositionGroup, sourceTeam: string) => number | null;
+  matchupFor: (defense: string, group: PositionGroup) => number | null;
   onSelect: (pid: string) => void;
   highlightOwner?: string;
 }) {
@@ -411,7 +412,7 @@ function TeamSide({
               </span>
               <span className="tiny muted">{p.ownerName}</span>
             </span>
-            <MatchupChip score={p.group ? matchupFor(opponent, p.group, team) : null} />
+            <MatchupChip score={p.group ? matchupFor(opponent, p.group) : null} />
             <span className="mono small bold" style={{ minWidth: 42, textAlign: 'right' }}>
               {p.played ? fmt1(p.points) : fmt1(p.projected)}
             </span>

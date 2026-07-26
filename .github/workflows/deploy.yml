@@ -51,6 +51,8 @@ jobs:
 
       - run: npm run verify:power
 
+      - run: npm run verify:matchup
+
       - run: npm run build
 
       # Requires Pages to already be enabled on the repo with the "GitHub

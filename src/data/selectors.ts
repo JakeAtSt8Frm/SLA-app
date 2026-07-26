@@ -60,7 +60,8 @@ export function enrichPlayer(
   const act = data.score(statLine);
   const played = hasPlayed(statLine);
 
-  const matchup = data.matchupIndex.get(group, opponent, playerTeam);
+  const matchupIndex = data.pregameMatchupIndexes.get(week) ?? data.matchupIndex;
+  const matchup = matchupIndex.get(group, opponent);
   const matchupScore = matchup?.score ?? null;
 
   return {

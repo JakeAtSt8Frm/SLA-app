@@ -1,7 +1,7 @@
 /**
  * Cross-season model research.
  *
- * Downloads 2024 and 2025 player-week data, creates leakage-safe observations
+ * Downloads 2023–2025 player-week data, creates leakage-safe observations
  * (only weeks before the target are available), and reports which candidate
  * signals improve next-week player and matchup prediction out of sample.
  */
@@ -28,6 +28,9 @@ import type { Player, PositionGroup, StatLine } from '../src/lib/types';
 import { POSITION_GROUPS } from '../src/lib/types';
 
 const LEAGUES: Record<string, string> = {
+  // 2023 predates this Sleeper league, but NFL stats are league-independent;
+  // the 2024 id supplies the same custom scoring settings for that season.
+  '2023': '1122650835105759232',
   '2024': '1122650835105759232',
   '2025': '1180280389862244352',
 };
@@ -340,16 +343,24 @@ function buildPlayerObservations(dataset: SeasonDataset): FeatureRow[] {
       const teamHistory = (dataset.byTeamGroup.get(key(target.group, target.team)) ?? []).filter(
         (row) => row.week < targetWeek,
       );
-      const matchup = matchupIndex.get(target.group, target.opponent, target.team);
+      const matchup = matchupIndex.get(target.group, target.opponent);
       const existing = valueIndex.byPlayer.get(target.pid);
+      const priorMean = mean(scores);
+      const currentProjection = target.projected ?? priorMean;
 
       observations.push({
         season: dataset.season,
         week: targetWeek,
         group: target.group,
         outcome: target.actual,
+        player: target.pid,
+        opponent: target.opponent,
+        projectionAvailable: target.projected === null ? 0 : 1,
+        projectionResidual:
+          target.projected === null ? 0 : target.actual - target.projected,
+        formResidual: target.actual - priorMean,
         existingValue: existing?.score ?? 500,
-        ppg: mean(scores),
+        ppg: priorMean,
         last4: recentMean(scores, 4),
         ewma: ewma(scores),
         floor: quantile(scores, 0.25),
@@ -367,7 +378,10 @@ function buildPlayerObservations(dataset: SeasonDataset): FeatureRow[] {
         scheduleAdjustedPpg: mean(adjustedScores),
         teamStrength: mean(teamHistory.map((row) => row.points)),
         matchup: matchup?.score ?? 50,
-        currentProjection: target.projected ?? mean(scores),
+        matchupBase: matchup?.baseScore ?? 50,
+        matchupAdjusted: matchup?.opponentAdjustedScore ?? 50,
+        matchupOpportunity: matchup?.opportunityScore ?? 50,
+        currentProjection,
       });
     }
   }
@@ -430,7 +444,7 @@ function buildMatchupObservations(dataset: SeasonDataset): FeatureRow[] {
       const sourceHistory = (
         dataset.byTeamGroup.get(key(target.group, target.sourceTeam)) ?? []
       ).filter((row) => row.week < targetWeek);
-      const existing = matchupIndex.get(target.group, target.defense, target.sourceTeam);
+      const existing = matchupIndex.get(target.group, target.defense);
 
       observations.push({
         season: dataset.season,
@@ -541,11 +555,14 @@ function report(
   base: string,
 ): void {
   const ranked = percentileObservations(rows, features);
+  const discovery = ranked.filter((row) => row.season === '2023');
   const train = ranked.filter((row) => row.season === '2024');
   const test = ranked.filter((row) => row.season === '2025');
 
   console.log(`\n${'='.repeat(84)}\n${title}\n${'='.repeat(84)}`);
-  console.log(`observations: ${rows.length} (${train.length} train / ${test.length} holdout)`);
+  console.log(
+    `observations: ${rows.length} (${discovery.length} discovery / ${train.length} validation / ${test.length} holdout)`,
+  );
   console.log('\nSignal                         2024 rho   2025 rho   best blend   holdout rho');
 
   for (const feature of features) {
@@ -611,6 +628,31 @@ function reportComposite(
   }
 }
 
+function reportFeatureByPosition(
+  title: string,
+  rows: FeatureRow[],
+  features: string[],
+): void {
+  const ranked = percentileObservations(rows, features);
+  console.log(`\n${title}`);
+  console.log(
+    `  ${'Pos'.padEnd(5)}${features.map((feature) => feature.padStart(31)).join('')}`,
+  );
+  for (const group of POSITION_GROUPS) {
+    const cells = features.map((feature) =>
+      ['2023', '2024', '2025']
+        .map((season) =>
+          correlation(
+            ranked.filter((row) => row.season === season && row.group === group),
+            feature,
+          ).toFixed(3),
+        )
+        .join(' / '),
+    );
+    console.log(`  ${group.padEnd(5)}${cells.map((cell) => cell.padStart(31)).join('')}`);
+  }
+}
+
 async function main() {
   console.log('Downloading player dictionary…');
   const players = new Map<string, Player>(Object.entries(await getAllPlayers()));
@@ -666,6 +708,33 @@ async function main() {
     'existingValue',
   );
 
+  const playerMatchupFeatures = [
+    'matchup',
+    'matchupBase',
+    'matchupAdjusted',
+    'matchupOpportunity',
+  ];
+  const projectionResidualRows = playerRows
+    .filter((row) => Number(row.projectionAvailable) === 1)
+    .map((row) => ({ ...row, outcome: Number(row.projectionResidual) }));
+  report(
+    'PLAYER MATCHUP: predicting actual minus Sleeper projection',
+    projectionResidualRows,
+    playerMatchupFeatures,
+    'matchup',
+  );
+  reportFeatureByPosition(
+    'Player projection residual correlations by position (2023 / 2024 / 2025)',
+    projectionResidualRows,
+    playerMatchupFeatures,
+  );
+  report(
+    'PLAYER MATCHUP: predicting actual minus prior player PPG',
+    playerRows.map((row) => ({ ...row, outcome: Number(row.formResidual) })),
+    playerMatchupFeatures,
+    'matchup',
+  );
+
   const matchupRows = datasets.flatMap(buildMatchupObservations);
   const matchupFeatures = [
     'existingMatchup',
@@ -685,17 +754,6 @@ async function main() {
     'MATCHUP SCORE: predicting next-week group points allowed percentile',
     matchupRows,
     matchupFeatures,
-    'existingMatchup',
-  );
-  reportComposite(
-    'MATCHUP CANDIDATE (defence + schedule adjustment + volume + opponent unit)',
-    matchupRows,
-    {
-      existingMatchup: 0.35,
-      opponentAdjustedAllowed: 0.15,
-      opportunitiesAllowed: 0.1,
-      sourceStrength: 0.4,
-    },
     'existingMatchup',
   );
 }
