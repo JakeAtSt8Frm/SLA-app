@@ -163,45 +163,28 @@ here — there is nothing to run the league's scoring against.
 
 ### Power rankings
 
-Power is measured in **points per week above a replacement-level roster**, not in
-averaged Value Scores. Averaging percentiles was wrong three ways at once, and
-the 2026 tight ends show all three:
+Power is the **custom-scored projected PPG of each roster's best legal starting
+lineup**. It uses the same forecast/observed-form blend as player valuation, then
+solves every Sleeper starter slot together. A player can count once, superflex
+can use any eligible position, and bench quantity cannot inflate a one-starter
+position such as TE.
 
-| | |
-|---|---|
-| Value Score | 855, 852, 841, 835, 834, 783 |
-| Projected PPG | 16.5, 14.8, 13.0, 11.2, 11.1, 8.7 |
+The previous experimental VORP model applied a 35% discount to weak starters,
+guessed waiver value from the worst rostered player and added a 25% decaying
+depth premium. Those constants were not learned from league results, so the
+displayed “points above replacement” did not match the math. They have been
+removed.
 
-- **Percentiles compress the top.** Value Score is a percentile *within* a
-  position, so the six best tight ends in the league land in a 21-point band on a
-  1000-point scale. The metric genuinely could not tell the best tight end from
-  the fifth best.
-- **Starting slots were ignored.** This league starts one TE and four LBs.
-  Averaging a team's tight ends let a third and fourth TE — players who will
-  never enter a lineup — outvote which team owned the best one. That is how a
-  team with the #6 TE outranked the team holding **#1**.
-- **There was no scarcity.** Twelve points a game from a superflex QB and twelve
-  from a kicker are not the same asset, but two 90th percentiles look identical.
+Depth is still visible, but it is kept separate from the headline ranking:
+**average starter absence drop** is the projected lineup loss after removing
+each starter one at a time and re-solving the legal lineup. That makes resilience
+comparable without letting an arbitrary bench weight reorder stronger starting
+lineups. Exact ties in projected PPG prefer the more resilient roster.
 
-So each player is scored by **VORP** — his blended projection minus the
-production at his position's startable cliff, in this league's custom scoring —
-and a team's positional power is that VORP summed over the slots the league
-actually starts, taken from the league's own `roster_positions` with flex slots
-split fractionally. Scarcity then needs no multiplier: points are already
-comparable across positions, so superflex QB carries two slots over a wide spread
-and dominates, while K carries one slot over a nearly flat pool and barely moves.
-
-Outliers can't drag a team down. Depth beyond the starting slots only ever adds —
-a decaying insurance premium, floored at zero — so rostering a spare terrible
-kicker behind a good one changes nothing at all. A dud only counts when he *is*
-the starter, and then only at a discount, since a hole is partly fixable from
-waivers. An unfilled slot is charged the same way, so a weak fourth linebacker
-still beats no fourth linebacker.
-
-Every row shows the starters it is made of with their league-wide positional
-rank, because "who is actually in this number" is the whole answer to why a team
-ranks where it does. `npm run verify:power` pins the model against the real 2026
-tight end case.
+Every positional row names the players actually assigned to the best lineup,
+with their league-wide projected-PPG rank. `npm run verify:power` checks the real
+2026 tight-end case, duplicate Sleeper ids, missing forecasts, bench resilience
+and a superflex case where the correct second starter is not a quarterback.
 
 Any player is clickable for a detail sheet with a projected-vs-actual chart, a
 full season profile, a "why this Value Score" breakdown, and a week-by-week
