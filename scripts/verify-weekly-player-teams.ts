@@ -17,9 +17,9 @@ const weekProjections = new Map<number, Record<string, StatLine>>([
   [2, { [pid]: { pass_td: 1 } }],
   [3, { [pid]: { pass_td: 1 } }],
 ]);
-const weekTeams = new Map<number, Record<string, string>>([
-  [1, { [pid]: 'LV' }],
-  [2, { [pid]: 'CAR' }],
+const weekOpponents = new Map<number, Record<string, string>>([
+  [1, { [pid]: 'DEN' }],
+  [2, { [pid]: 'NO' }],
   [3, {}],
 ]);
 
@@ -28,18 +28,18 @@ const valueIndex = buildValueIndex({
   playersById,
   weekStats,
   weekProjections,
-  weekTeams,
+  weekOpponents,
   throughWeek: 3,
 });
 
 assert.deepEqual(
-  valueIndex.weeklyScores.get(pid)?.map(({ week, team }) => ({ week, team })),
+  valueIndex.weeklyScores.get(pid)?.map(({ week, opponent }) => ({ week, opponent })),
   [
-    { week: 1, team: 'LV' },
-    { week: 2, team: 'CAR' },
-    { week: 3, team: null },
+    { week: 1, opponent: 'DEN' },
+    { week: 2, opponent: 'NO' },
+    { week: 3, opponent: null },
   ],
-  'weekly scores must retain that week’s NFL team without a current-team fallback',
+  'weekly scores must retain that week’s opponent without a current-team fallback',
 );
 
-console.log('Weekly NFL-team checks passed.');
+console.log('Weekly opponent checks passed.');
