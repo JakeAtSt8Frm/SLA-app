@@ -45,8 +45,11 @@ export function PlayersPage() {
     const needle = deferredQuery.trim().toLowerCase();
     const rows: Array<{ pid: string; sortValue: number }> = [];
 
-    for (const [pid, value] of data.valueIndex.byPlayer) {
-      if (group !== 'ALL' && value.group !== group) continue;
+    for (const [pid, combinedScore] of data.combinedScores) {
+      const value = data.valueIndex.byPlayer.get(pid) ?? null;
+      const dynasty = data.dynastyIndex.byPlayer.get(pid) ?? null;
+      const playerGroup = value?.group ?? dynasty?.group ?? null;
+      if (!playerGroup || (group !== 'ALL' && playerGroup !== group)) continue;
 
       const isOwned = owned.has(pid);
       if (availability === 'free' && isOwned) continue;
@@ -61,17 +64,21 @@ export function PlayersPage() {
         if (!name.includes(needle) && !team.includes(needle)) continue;
       }
 
-      const b = value.breakdown;
       const sortValue =
         sort === 'value'
-          ? (data.combinedScores.get(pid) ?? value.score)
+          ? combinedScore
           : sort === 'ppg'
-            ? b.ppg
+            ? (value?.breakdown.ppg ??
+              dynasty?.breakdown.projectedPpg ??
+              dynasty?.breakdown.blendedPpg ??
+              0)
             : sort === 'total'
-              ? b.total
+              ? (value?.breakdown.total ??
+                dynasty?.breakdown.projectedSeasonPoints ??
+                0)
               : sort === 'last4'
-                ? b.last4
-                : b.boomRate;
+                ? (value?.breakdown.last4 ?? 0)
+                : (value?.breakdown.boomRate ?? 0);
 
       rows.push({ pid, sortValue });
     }
@@ -80,7 +87,7 @@ export function PlayersPage() {
     // Cap the render — a full unfiltered list is ~1800 rows and nobody scrolls
     // past the first hundred.
     return rows.slice(0, 150).map((r) => ({
-      player: enrichPlayer(data, r.pid, data.currentWeek, data.valueIndex.byPlayer.get(r.pid)!.group, false),
+      player: enrichPlayer(data, r.pid, data.currentWeek, '', false),
       owner: ownerByPid.get(r.pid) ?? null,
     }));
   }, [data, group, availability, sort, deferredQuery, owned, ownerByPid]);

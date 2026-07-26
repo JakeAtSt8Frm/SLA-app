@@ -15,6 +15,7 @@ import {
   getNflState,
   getResearch,
   getRosters,
+  getSeasonProjections,
   getUsers,
   getWeekProjections,
   getWeekStats,
@@ -25,10 +26,16 @@ import {
   createScorer,
   groupForPlayer,
   hasPlayed,
+  opportunities,
   type ScoringModel,
 } from '../lib/scoring';
 import { buildValueIndex, type ValueIndex } from '../lib/value';
-import { buildDynastyIndex, type DynastyIndex, type SeasonPpg } from '../lib/dynasty';
+import {
+  buildDynastyIndex,
+  type DynastyIndex,
+  type SeasonPpg,
+  type SeasonProjectionMap,
+} from '../lib/dynasty';
 import { getMarketValues, marketQueryFromLeague } from '../lib/market';
 import { buildMatchupIndex, type MatchupIndex } from '../lib/matchup';
 import { starterSlots } from '../lib/optimal';
@@ -242,6 +249,46 @@ async function loadSeasonPpg(
 }
 
 /**
+ * Scores Sleeper's full-season forecast with the league's custom rules.
+ *
+ * Sleeper currently reports `gp: 18` for a full NFL schedule including the bye
+ * week, so the per-game rate is capped at the 17 games a player can play.
+ */
+function summarizeSeasonProjections(
+  statsByPlayer: Record<string, StatLine>,
+  scoringModel: ScoringModel,
+  playersById: Map<string, Player>,
+): SeasonProjectionMap {
+  const NFL_GAMES = 17;
+  const score = createScorer(scoringModel);
+  const projections: SeasonProjectionMap = new Map();
+
+  for (const [pid, stats] of Object.entries(statsByPlayer)) {
+    const player = playersById.get(pid);
+    const group = groupForPlayer(player);
+    if (!group) continue;
+
+    const total = score(stats);
+    if (total <= 0) continue;
+
+    const rawGames = Number(stats.gp ?? NFL_GAMES);
+    const games = Math.max(
+      1,
+      Math.min(NFL_GAMES, Number.isFinite(rawGames) ? rawGames : NFL_GAMES),
+    );
+    const usage = opportunities(group, stats);
+    projections.set(pid, {
+      total,
+      ppg: total / games,
+      games,
+      usagePerGame: usage === null ? null : usage / games,
+    });
+  }
+
+  return projections;
+}
+
+/**
  * Loads a season.
  *
  * `rosterSeason` lets the rosters come from a different year than the scoring
@@ -419,17 +466,16 @@ export async function loadLeague(
 
   report('Loading dynasty inputs', 2, 3);
 
-  // Dynasty inputs are all best-effort third-party / historical data: the two
-  // prior seasons' production (for the 80/20 multi-year blend) and the current
-  // trade market. A failure in either degrades the dynasty score gracefully
-  // rather than blocking the app, so the core in-season views never wait on them.
+  // Dynasty inputs are all best-effort third-party / historical data: prior
+  // production, the current season forecast and the trade market. A failure in
+  // any one degrades the model gracefully rather than blocking the app.
   const priorYears = [String(Number(season) - 1), String(Number(season) - 2)];
   const marketQuery = marketQueryFromLeague(
     league.roster_positions,
     league.total_rosters,
     league.scoring_settings?.rec,
   );
-  const [priorSeasons, market] = await Promise.all([
+  const [priorSeasons, market, seasonProjections] = await Promise.all([
     Promise.all(
       priorYears.map((year) =>
         loadSeasonPpg(year, scoringModel, playersById, signal).catch(
@@ -438,12 +484,22 @@ export async function loadLeague(
       ),
     ),
     getMarketValues(marketQuery, signal).catch(() => new Map()),
+    nflState.season === season
+      ? cached(`proj-season:${season}`, TTL.SEASON_PROJECTIONS, () =>
+          getSeasonProjections(season, signal),
+        )
+          .then((payload) =>
+            summarizeSeasonProjections(payload.stats, scoringModel, playersById),
+          )
+          .catch(() => new Map() as SeasonProjectionMap)
+      : Promise.resolve(new Map() as SeasonProjectionMap),
   ]);
 
   const dynastyIndex = buildDynastyIndex({
     valueIndex,
     playersById,
     priorSeasons,
+    seasonProjections,
     market,
     rosterPositions: league.roster_positions ?? [],
     numTeams: league.total_rosters ?? rosters.length,

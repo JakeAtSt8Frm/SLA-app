@@ -11,6 +11,7 @@
     "research:dynasty": "tsx scripts/research-dynasty-history.ts",
     "research": "tsx scripts/research-models.ts",
     "verify": "tsx scripts/verify-scoring.ts",
+    "verify:dynasty": "tsx scripts/verify-dynasty-projections.ts",
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {

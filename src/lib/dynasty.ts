@@ -15,8 +15,9 @@
  * market beats intrinsic.
  *
  * Design choices worth preserving:
- *  - Production is blended across seasons: 80% the current year, 20% the prior
- *    two, so a single hot or cold season doesn't define a multi-year asset.
+ *  - Production blends the current year with the prior two, then folds in the
+ *    current season projection at a conservative weight that fades as a player
+ *    records real games.
  *  - Production enters as VORP (points above the league's real replacement level,
  *    derived from its actual starting requirements) and is percentiled *across
  *    all positions*, so a scarce-position starter outranks a deep-position one —
@@ -34,6 +35,12 @@ import type { ValueIndex } from './value';
 
 /** Blend weight on the current season; the prior two share the remainder. */
 export const CURRENT_SEASON_WEIGHT = 0.8;
+/** Forecast share before a player records a game. */
+export const PRESEASON_PROJECTION_WEIGHT = 0.4;
+/** Forecast share retained once real production has a useful sample. */
+export const IN_SEASON_PROJECTION_WEIGHT = 0.15;
+/** Games over which the forecast fades from preseason to in-season weight. */
+export const PROJECTION_FADE_GAMES = 6;
 
 /**
  * Dynasty leg weights (sum ~1.0), tuned for a superflex, TE-premium, IDP league.
@@ -95,6 +102,9 @@ export interface DynastyBreakdown {
   games: number;
   currentPpg: number | null;
   priorPpg: number | null;
+  projectedSeasonPoints: number | null;
+  projectedPpg: number | null;
+  projectionWeight: number;
   blendedPpg: number | null;
   replacementPpg: number;
   vorp: number | null;
@@ -129,11 +139,22 @@ export interface DynastyIndex {
 /** Per-player blended production summary for one prior season. */
 export type SeasonPpg = Map<string, { ppg: number; games: number }>;
 
+export interface ProjectedSeason {
+  total: number;
+  ppg: number;
+  games: number;
+  usagePerGame: number | null;
+}
+
+export type SeasonProjectionMap = Map<string, ProjectedSeason>;
+
 export interface BuildDynastyIndexInput {
   valueIndex: ValueIndex;
   playersById: Map<string, Player>;
   /** Prior-season PPG maps, most-recent first. Up to two. */
   priorSeasons: SeasonPpg[];
+  /** Current-season Sleeper totals, scored with this league's settings. */
+  seasonProjections?: SeasonProjectionMap;
   market: Map<string, MarketEntry>;
   rosterPositions: string[];
   numTeams: number;
@@ -265,9 +286,13 @@ interface Row {
   games: number;
   currentPpg: number | null;
   priorPpg: number | null;
+  projectedSeasonPoints: number | null;
+  projectedPpg: number | null;
+  projectionWeight: number;
   blendedPpg: number | null;
   vorp: number | null;
   roleRaw: number | null;
+  projectedRoleRaw: number | null;
   effRaw: number | null;
   availability: number;
   injuryFactor: number;
@@ -301,6 +326,38 @@ function blendPpg(current: number | null, prior: number | null): number | null {
   return current ?? prior;
 }
 
+/** Forecast weight after `games` of real current-season evidence. */
+export function seasonProjectionWeight(games: number): number {
+  if (games <= 0) return PRESEASON_PROJECTION_WEIGHT;
+  if (games >= PROJECTION_FADE_GAMES) return IN_SEASON_PROJECTION_WEIGHT;
+  const progress = clamp01(games / PROJECTION_FADE_GAMES);
+  return (
+    PRESEASON_PROJECTION_WEIGHT +
+    (IN_SEASON_PROJECTION_WEIGHT - PRESEASON_PROJECTION_WEIGHT) * progress
+  );
+}
+
+/**
+ * Blends a full-season rate projection into observed multi-year production.
+ *
+ * A projection is never added to actual points: both describe the same season.
+ * Instead its rate is a prior that fades as real games accumulate.
+ */
+export function blendProjectedPpg(
+  observedPpg: number | null,
+  projectedPpg: number | null,
+  games: number,
+): { ppg: number | null; projectionWeight: number } {
+  if (projectedPpg === null) return { ppg: observedPpg, projectionWeight: 0 };
+  if (observedPpg === null) return { ppg: projectedPpg, projectionWeight: 1 };
+
+  const projectionWeight = seasonProjectionWeight(games);
+  return {
+    ppg: observedPpg * (1 - projectionWeight) + projectedPpg * projectionWeight,
+    projectionWeight,
+  };
+}
+
 /** Maps a current injury designation to a 0..1 availability multiplier. */
 function injuryFactorFor(player: Player | undefined): number {
   const status = String(player?.injury_status ?? player?.status ?? '')
@@ -315,13 +372,22 @@ function injuryFactorFor(player: Player | undefined): number {
 }
 
 export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
-  const { valueIndex, playersById, priorSeasons, market, rosterPositions, numTeams } = input;
+  const {
+    valueIndex,
+    playersById,
+    priorSeasons,
+    seasonProjections = new Map(),
+    market,
+    rosterPositions,
+    numTeams,
+  } = input;
 
   const depth = startingDepthByGroup(rosterPositions, numTeams);
 
-  // The universe: everyone with current-season production, plus market-priced
-  // players who haven't recorded a snap (stashed rookies, returning veterans).
+  // The universe: current producers, projected players (including IDPs and
+  // rookies), plus market-priced assets without an on-field projection.
   const pids = new Set<string>(valueIndex.byPlayer.keys());
+  for (const pid of seasonProjections.keys()) if (playersById.has(pid)) pids.add(pid);
   for (const pid of market.keys()) if (playersById.has(pid)) pids.add(pid);
 
   const rows: Row[] = [];
@@ -337,7 +403,13 @@ export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
     const games = b?.games ?? 0;
     const currentPpg = b ? b.ppg : null;
     const priorPpg = priorAveragePpg(priorSeasons, pid);
-    const blendedPpg = blendPpg(currentPpg, priorPpg);
+    const projection = seasonProjections.get(pid) ?? null;
+    const observedPpg = blendPpg(currentPpg, priorPpg);
+    const projectedBlend = blendProjectedPpg(
+      observedPpg,
+      projection?.ppg ?? null,
+      games,
+    );
 
     // Role: recent opportunity share leads, snap share supports.
     const share = b?.recentOpportunityShare ?? b?.opportunityShare ?? null;
@@ -358,11 +430,19 @@ export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
       games,
       currentPpg,
       priorPpg,
-      blendedPpg,
+      projectedSeasonPoints: projection?.total ?? null,
+      projectedPpg: projection?.ppg ?? null,
+      projectionWeight: projectedBlend.projectionWeight,
+      blendedPpg: projectedBlend.ppg,
       vorp: null,
       roleRaw,
+      projectedRoleRaw: projection?.usagePerGame ?? null,
       effRaw: b?.efficiency ?? null,
-      availability: b ? b.availability : 0.6,
+      availability: b
+        ? b.availability
+        : projection
+          ? clamp01(projection.games / 17)
+          : 0.6,
       injuryFactor: injuryFactorFor(player),
       yearsExp: typeof player?.years_exp === 'number' ? player.years_exp : null,
       market: market.get(pid) ?? null,
@@ -378,7 +458,11 @@ export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
   const minGames = Math.max(2, Math.floor(input.throughWeek * 0.3));
   for (const [group, groupRows] of byGroup) {
     const producers = groupRows
-      .filter((r) => r.blendedPpg !== null && (r.games >= minGames || r.priorPpg !== null))
+      .filter(
+        (r) =>
+          r.blendedPpg !== null &&
+          (r.games >= minGames || r.priorPpg !== null || r.projectedPpg !== null),
+      )
       .map((r) => r.blendedPpg as number)
       .sort((a, b) => b - a);
     const repl = replacementPpg(producers, depth.get(group) ?? producers.length);
@@ -397,6 +481,7 @@ export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
   const vorpByGroup = new Map<PositionGroup, Map<string, number>>();
   const marketByGroup = new Map<PositionGroup, Map<string, number>>();
   const roleByGroup = new Map<PositionGroup, Map<string, number>>();
+  const projectedRoleByGroup = new Map<PositionGroup, Map<string, number>>();
   const effByGroup = new Map<PositionGroup, Map<string, number>>();
   const inGroup = (
     groupRows: Row[],
@@ -411,6 +496,7 @@ export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
     vorpByGroup.set(group, inGroup(groupRows, (r) => r.vorp));
     marketByGroup.set(group, inGroup(groupRows, (r) => r.market?.value ?? null));
     roleByGroup.set(group, inGroup(groupRows, (r) => r.roleRaw));
+    projectedRoleByGroup.set(group, inGroup(groupRows, (r) => r.projectedRoleRaw));
     effByGroup.set(group, inGroup(groupRows, (r) => r.effRaw));
   }
 
@@ -429,7 +515,12 @@ export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
           ? marketNorm
           : 0.3;
     const ageNorm = longevity(r.group, r.age);
-    const roleNorm = r.roleRaw !== null ? (roleByGroup.get(r.group)?.get(r.pid) ?? 0.5) : 0.5;
+    const roleNorm =
+      r.roleRaw !== null
+        ? (roleByGroup.get(r.group)?.get(r.pid) ?? 0.5)
+        : r.projectedRoleRaw !== null
+          ? (projectedRoleByGroup.get(r.group)?.get(r.pid) ?? 0.5)
+          : 0.5;
     const effNorm = r.effRaw !== null ? (effByGroup.get(r.group)?.get(r.pid) ?? 0.5) : 0.5;
     const riskNorm = clamp01(
       (r.games > 0 ? r.availability : 0.6) * r.injuryFactor,
@@ -467,7 +558,13 @@ export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
     // for players with little to go on. A market-priced player without snaps
     // still carries real information, so he is shrunk only lightly.
     const confidence =
-      r.games > 0 ? 0.7 + 0.3 * clamp01((r.games - 1) / 4) : market ? 0.8 : 0.55;
+      r.games > 0
+        ? 0.7 + 0.3 * clamp01((r.games - 1) / 4)
+        : market
+          ? 0.8
+          : r.projectedPpg !== null
+            ? 0.75
+            : 0.55;
     raw = 0.5 + (raw - 0.5) * confidence;
 
     const score = Math.round(clamp01(raw) * 1000);
@@ -493,6 +590,10 @@ export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
         games: r.games,
         currentPpg: r.currentPpg === null ? null : round(r.currentPpg, 1),
         priorPpg: r.priorPpg === null ? null : round(r.priorPpg, 1),
+        projectedSeasonPoints:
+          r.projectedSeasonPoints === null ? null : round(r.projectedSeasonPoints, 1),
+        projectedPpg: r.projectedPpg === null ? null : round(r.projectedPpg, 1),
+        projectionWeight: round(r.projectionWeight, 3),
         blendedPpg: r.blendedPpg === null ? null : round(r.blendedPpg, 1),
         replacementPpg: round(replacementByGroup.get(r.group) ?? 0, 1),
         vorp: r.vorp === null ? null : round(r.vorp, 1),
@@ -519,7 +620,7 @@ export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
 /* -------------------------------------------------------------------------- */
 
 const LEG_LABELS: Record<keyof typeof DYNASTY_WEIGHTS, string> = {
-  production: 'Multi-year VORP',
+  production: 'Production forecast & VORP',
   age: 'Age & longevity',
   market: 'Market value',
   role: 'Role & usage',

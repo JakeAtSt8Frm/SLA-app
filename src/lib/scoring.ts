@@ -199,15 +199,21 @@ export function opportunities(group: PositionGroup, stats: StatLine): number | n
     const v = stats[key];
     return typeof v === 'number' && Number.isFinite(v) ? v : 0;
   };
+  const projectedReceivingVolume = (): number => {
+    const targets = stats.rec_tgt;
+    return typeof targets === 'number' && Number.isFinite(targets)
+      ? targets
+      : n('rec');
+  };
 
   switch (group) {
     case 'QB':
       return n('pass_att') + n('rush_att');
     case 'RB':
-      return n('rush_att') + n('rec_tgt');
+      return n('rush_att') + projectedReceivingVolume();
     case 'WR':
     case 'TE':
-      return n('rec_tgt');
+      return projectedReceivingVolume();
     case 'K':
       return n('fga') + n('xpa');
     case 'DL':
