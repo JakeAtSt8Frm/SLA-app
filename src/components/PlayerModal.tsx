@@ -404,6 +404,7 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                   <thead>
                     <tr>
                       <th>Week</th>
+                      <th>NFL team</th>
                       <th className="num">Projected</th>
                       <th className="num">Actual</th>
                       <th className="num">Δ</th>
@@ -415,6 +416,7 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                       return (
                         <tr key={w.week}>
                           <td>Week {w.week}</td>
+                          <td className="mono">{w.team ?? '—'}</td>
                           <td className="num muted">
                             {w.projected === null ? '—' : w.projected.toFixed(1)}
                           </td>

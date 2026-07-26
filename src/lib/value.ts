@@ -90,12 +90,20 @@ export interface PlayerValue {
   breakdown: ValueBreakdown;
 }
 
+export interface WeeklyPlayerScore {
+  week: number;
+  actual: number;
+  projected: number | null;
+  /** NFL team reported by the stat feed for this specific week. */
+  team: string | null;
+}
+
 export interface ValueIndex {
   byPlayer: Map<string, PlayerValue>;
   ppgRanks: Map<string, RankInfo>;
   totalRanks: Map<string, RankInfo>;
   /** Per-player, per-week custom scores — reused by charts and history. */
-  weeklyScores: Map<string, Array<{ week: number; actual: number; projected: number | null }>>;
+  weeklyScores: Map<string, WeeklyPlayerScore[]>;
   seasonTotals: Map<string, number>;
 }
 
@@ -104,7 +112,7 @@ interface Accumulator {
   scheduleAdjustedTotal: number;
   games: number;
   weekScores: number[];
-  weeklyDetail: Array<{ week: number; actual: number; projected: number | null }>;
+  weeklyDetail: WeeklyPlayerScore[];
   lastActs: number[];
   boom: number;
   bust: number;
@@ -300,7 +308,7 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
       // otherwise every unprojected week would register as a boom.
       const projLine = projections[pid];
       const projected = hasValidProjection(projLine) ? score(projLine) : null;
-      a.weeklyDetail.push({ week, actual, projected });
+      a.weeklyDetail.push({ week, actual, projected, team: teams[pid] ?? null });
 
       if (projected !== null && projected > 0) {
         a.projGames += 1;
@@ -629,7 +637,7 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
   }
 
   // Weekly detail + season totals, exposed for charts and history views.
-  const weeklyScores = new Map<string, Array<{ week: number; actual: number; projected: number | null }>>();
+  const weeklyScores = new Map<string, WeeklyPlayerScore[]>();
   const seasonTotals = new Map<string, number>();
   for (const [pid, a] of agg) {
     a.weeklyDetail.sort((x, y) => x.week - y.week);
