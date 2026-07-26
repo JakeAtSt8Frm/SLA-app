@@ -275,7 +275,9 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                     value={fmt1(dynasty.breakdown.projectedSeasonPoints)}
                     sub={
                       dynasty.breakdown.projectionSources.length > 1
-                        ? 'Sleeper + FFToday average · custom scoring'
+                        ? `${dynasty.breakdown.projectionSources
+                            .map((source) => source.name)
+                            .join(' + ')} · scale-matched average`
                         : `${dynasty.breakdown.projectionSources[0]?.name ?? 'Season'} stats · custom scoring`
                     }
                   />

@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   schedule:
-    # FFToday updates preseason projections throughout the summer.
+    # Both projection sources revise throughout the preseason.
     - cron: '17 10 * * *'
   # Lets you redeploy by hand from the Actions tab.
   workflow_dispatch:
@@ -35,11 +35,21 @@ jobs:
 
       - run: npm ci
 
-      # FFToday does not allow browser CORS, so normalize its public projection
-      # pages into the static artifact at build time. The checked-in snapshot is
-      # a fallback if the source is temporarily unavailable.
+      # Neither source allows browser CORS, so normalize their public projection
+      # pages into the static artifact at build time. They refresh as separate
+      # steps so one site being down does not cost us the other's update, and
+      # the checked-in snapshots are the fallback either way.
       - run: npm run refresh:fftoday
         continue-on-error: true
+
+      - run: npm run refresh:sharks
+        continue-on-error: true
+
+      # Catches a source silently changing its columns before a degraded
+      # snapshot can reach the build.
+      - run: npm run verify:projections
+
+      - run: npm run verify:power
 
       - run: npm run build
 

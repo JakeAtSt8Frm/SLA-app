@@ -1,26 +1,45 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+/**
+ * Imports FFToday's full-season projections.
+ *
+ * FFToday publishes one paginated HTML table per position with a fixed column
+ * order and no header ids, so rows are read positionally against the column
+ * list declared here.
+ *
+ * Kickers are deliberately not imported. FFToday publishes a single made-field-
+ * goal total, and this league scores field goals in five distance buckets worth
+ * 3 to 5 points each — splitting one total across them would be inventing the
+ * distribution rather than importing it. FantasySharks publishes the buckets, so
+ * kickers come from there and from Sleeper.
+ */
+
 import { fileURLToPath } from 'node:url';
 
 import {
-  FFTODAY_SOURCE_URL,
-  type FftodayProjection,
-  type FftodaySnapshot,
-} from '../src/lib/fftoday';
+  EXTERNAL_SOURCES,
+  type ExternalProjection,
+  type ProjectionSnapshot,
+} from '../src/lib/projections';
 import type { PositionGroup, StatLine } from '../src/lib/types';
+import { fetchText, targetSeason, writeSnapshot } from './snapshot';
 
 const LEAGUE_ID = '193033';
 const PAGE_SIZE = 50;
-const OUTPUT_PATH = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  '../public/data/fftoday-projections.json',
-);
 
 export interface PositionConfig {
   group: PositionGroup;
   posId: number;
   statKeys: string[];
 }
+
+const IDP_STAT_KEYS = [
+  'idp_tkl_solo',
+  'idp_tkl_ast',
+  'idp_sack',
+  'idp_pass_def',
+  'idp_int',
+  'idp_ff',
+  'idp_fum_rec',
+];
 
 const POSITIONS: PositionConfig[] = [
   {
@@ -52,45 +71,9 @@ const POSITIONS: PositionConfig[] = [
     posId: 40,
     statKeys: ['rec', 'rec_yd', 'rec_td'],
   },
-  {
-    group: 'DL',
-    posId: 50,
-    statKeys: [
-      'idp_tkl_solo',
-      'idp_tkl_ast',
-      'idp_sack',
-      'idp_pass_def',
-      'idp_int',
-      'idp_ff',
-      'idp_fum_rec',
-    ],
-  },
-  {
-    group: 'LB',
-    posId: 60,
-    statKeys: [
-      'idp_tkl_solo',
-      'idp_tkl_ast',
-      'idp_sack',
-      'idp_pass_def',
-      'idp_int',
-      'idp_ff',
-      'idp_fum_rec',
-    ],
-  },
-  {
-    group: 'DB',
-    posId: 70,
-    statKeys: [
-      'idp_tkl_solo',
-      'idp_tkl_ast',
-      'idp_sack',
-      'idp_pass_def',
-      'idp_int',
-      'idp_ff',
-      'idp_fum_rec',
-    ],
-  },
+  { group: 'DL', posId: 50, statKeys: IDP_STAT_KEYS },
+  { group: 'LB', posId: 60, statKeys: IDP_STAT_KEYS },
+  { group: 'DB', posId: 70, statKeys: IDP_STAT_KEYS },
 ];
 
 function decodeHtml(value: string): string {
@@ -119,9 +102,9 @@ function numberFromCell(value: string): number {
 export function parseProjectionPage(
   html: string,
   position: PositionConfig,
-): FftodayProjection[] {
+): ExternalProjection[] {
   const rows = html.match(/<TR\b[^>]*>[\s\S]*?<\/TR>/gi) ?? [];
-  const projections: FftodayProjection[] = [];
+  const projections: ExternalProjection[] = [];
 
   for (const row of rows) {
     const playerMatch = row.match(
@@ -142,7 +125,7 @@ export function parseProjectionPage(
     stats.gp = 17;
 
     projections.push({
-      fftodayId: playerMatch[1],
+      sourceId: playerMatch[1],
       name: textContent(playerMatch[2]),
       team: textContent(cells[2]).toUpperCase(),
       group: position.group,
@@ -153,9 +136,9 @@ export function parseProjectionPage(
   return projections;
 }
 
-function pageUrl(position: PositionConfig, page: number): string {
+function pageUrl(position: PositionConfig, season: string, page: number): string {
   const params = new URLSearchParams({
-    Season: String(new Date().getUTCFullYear()),
+    Season: season,
     PosID: String(position.posId),
     LeagueID: LEAGUE_ID,
     order_by: 'FFPts',
@@ -165,28 +148,15 @@ function pageUrl(position: PositionConfig, page: number): string {
   return `https://www.fftoday.com/rankings/playerproj.php?${params}`;
 }
 
-async function fetchPage(url: string): Promise<string> {
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': 'SLA-app projection importer (+https://github.com/JakeAtSt8Frm/SLA-app)',
-    },
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) {
-    throw new Error(`FFToday request failed (${response.status}) for ${url}`);
-  }
-  return response.text();
-}
-
-async function fetchPosition(position: PositionConfig): Promise<{
-  projections: FftodayProjection[];
-  updatedAt: string;
-}> {
-  const projections: FftodayProjection[] = [];
+async function fetchPosition(
+  position: PositionConfig,
+  season: string,
+): Promise<{ projections: ExternalProjection[]; updatedAt: string }> {
+  const projections: ExternalProjection[] = [];
   let updatedAt = '';
 
   for (let page = 0; ; page += 1) {
-    const html = await fetchPage(pageUrl(position, page));
+    const html = await fetchText(pageUrl(position, season, page));
     if (!updatedAt) {
       updatedAt =
         html.match(/Regular Season,\s*Updated:\s*([^<]+)/i)?.[1]?.trim() ?? '';
@@ -203,26 +173,25 @@ async function fetchPosition(position: PositionConfig): Promise<{
 }
 
 async function main(): Promise<void> {
+  const season = targetSeason();
   const positionResults = [];
   for (const position of POSITIONS) {
-    positionResults.push(await fetchPosition(position));
+    positionResults.push(await fetchPosition(position, season));
   }
 
-  const updatedDates = new Set(positionResults.map((result) => result.updatedAt).filter(Boolean));
-  const snapshot: FftodaySnapshot = {
+  const updatedDates = new Set(
+    positionResults.map((result) => result.updatedAt).filter(Boolean),
+  );
+  const snapshot: ProjectionSnapshot = {
     source: 'FFToday',
-    sourceUrl: FFTODAY_SOURCE_URL,
-    season: String(new Date().getUTCFullYear()),
+    sourceUrl: EXTERNAL_SOURCES.FFToday.url,
+    season,
     updatedAt: [...updatedDates].join(', ') || 'Unknown',
     fetchedAt: new Date().toISOString(),
     projections: positionResults.flatMap((result) => result.projections),
   };
 
-  await mkdir(dirname(OUTPUT_PATH), { recursive: true });
-  await writeFile(OUTPUT_PATH, `${JSON.stringify(snapshot)}\n`, 'utf8');
-  console.log(
-    `Wrote ${snapshot.projections.length} FFToday projections (${snapshot.updatedAt})`,
-  );
+  await writeSnapshot(snapshot);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
