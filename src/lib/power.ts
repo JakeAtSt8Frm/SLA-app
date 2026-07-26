@@ -1,54 +1,60 @@
 /**
- * Forward-looking roster power.
+ * Forward-looking roster power derived from the app's headline Value Score.
  *
- * Overall power is the custom-scored PPG of a team's best legal projected
- * lineup. Positional power is an outlier-resistant average across the whole
- * rostered position room, so it reflects depth without letting one extreme
- * projection dominate the result.
+ * Each position is starter-led, with a small contribution from a fixed number
+ * of backups. Overall power weights those position scores by starter slots so
+ * the league's larger position groups matter proportionally more.
  */
 
-import { startingDepthByGroup } from './dynasty';
-import {
-  computeOptimalLineup,
-  slotAccepts,
-  starterSlots,
-  type LineupCandidate,
-  type OptimalLineup,
-} from './optimal';
-import { mean, quantile } from './stats';
+import { mean } from './stats';
 import { POSITION_GROUPS, type PositionGroup } from './types';
 
-const DUMMY_PREFIX = '__power_replacement__';
+export const POSITION_BENCH_WEIGHT = 0.15;
+export const POSITION_STARTER_WEIGHT = 1 - POSITION_BENCH_WEIGHT;
+
+export const POSITION_POWER_COUNTS = {
+  QB: { starters: 2, bench: 1 },
+  RB: { starters: 3, bench: 2 },
+  WR: { starters: 4, bench: 3 },
+  TE: { starters: 1, bench: 1 },
+  K: { starters: 1, bench: 1 },
+  DL: { starters: 3, bench: 2 },
+  LB: { starters: 4, bench: 3 },
+  DB: { starters: 3, bench: 2 },
+} as const satisfies Record<PositionGroup, { starters: number; bench: number }>;
+
+const TOTAL_STARTER_SLOTS = POSITION_GROUPS.reduce(
+  (total, group) => total + POSITION_POWER_COUNTS[group].starters,
+  0,
+);
 
 export interface PowerPlayer {
   pid: string;
-  /** Blended custom-scored projection in points per game. */
-  projectedPpg: number;
-  /** Rank by projected PPG within the position, 1 = best. */
+  /** Headline Value Score on the app's 0–1000 scale. */
+  value: number;
+  /** Rank by Value Score within the position, 1 = best. */
   rank: number;
-  /** Headline Value Score, carried for display. */
-  value: number | null;
 }
 
 export interface PowerGroup {
   group: PositionGroup;
-  /** Expected starting slots per team; flex slots are split fractionally. */
+  /** Number of players that form the starter core for this position. */
   slots: number;
   starters: PowerPlayer[];
   depth: PowerPlayer[];
-  /** Exact legal lineup slots that could not be filled by a projected player. */
+  /** Configured starter places without a rated player. */
   unfilledSlots: number;
-  /** Projected PPG contributed by this position in the best legal lineup. */
-  starterScore: number;
-  /** Number of projections outside Tukey's 1.5× IQR fences. */
-  outliersRemoved: number;
-  /** Outlier-resistant average PPG across the rostered position room. */
+  /** Average Value of the configured starters, with missing places at zero. */
+  coreAverage: number;
+  /** Average Value of the configured backups, with missing places at zero. */
+  benchAverage: number;
+  /** 85% starter Value and 15% backup Value. */
   score: number;
 }
 
 export interface TeamPower {
   rosterId: number;
-  /** Projected PPG of the team's best legal starting lineup. */
+  /** Value-based position scores weighted by the number of starter slots. */
   overall: number;
   byGroup: Record<PositionGroup, PowerGroup>;
 }
@@ -59,228 +65,152 @@ export interface PowerRosterInput {
    * Every player the team holds — starters, bench, taxi and reserve.
    *
    * Sleeper may list an injured player in both `players` and `reserve`, so ids
-   * are de-duplicated before the lineup is solved.
+   * are de-duplicated before power is calculated.
    */
   playerIds: Iterable<string>;
 }
 
 export interface PowerPlayerInput {
   group: PositionGroup;
-  /** Null when no usable production history or forecast exists. */
-  projectedPpg: number | null;
+  /** Null when the app cannot calculate a headline Value Score. */
   value: number | null;
 }
 
 export interface BuildPowerIndexInput {
   rosters: PowerRosterInput[];
   players: Map<string, PowerPlayerInput>;
-  rosterPositions: string[];
-  numTeams: number;
 }
 
 export interface PowerIndex {
   byTeam: Map<number, TeamPower>;
-  /** Expected starting slots per team, per position. */
+  /** Configured starter count for each position. */
   slotsByGroup: Map<PositionGroup, number>;
-  /** Rostered projected players at each position, best PPG first. */
+  /** Rostered players at each position, best Value Score first. */
   ladderByGroup: Map<PositionGroup, PowerPlayer[]>;
 }
 
-function emptyGroup(group: PositionGroup, slots: number): PowerGroup {
-  return {
-    group,
-    slots,
-    starters: [],
-    depth: [],
-    unfilledSlots: 0,
-    starterScore: 0,
-    outliersRemoved: 0,
-    score: 0,
-  };
+function fixedSizeMean(values: number[], count: number): number {
+  if (count <= 0) return 0;
+  const selected = values.slice(0, count);
+  while (selected.length < count) selected.push(0);
+  return mean(selected);
 }
 
-function dummyGroupForSlot(slot: string): PositionGroup {
-  return POSITION_GROUPS.find((group) => slotAccepts(slot, group)) ?? 'QB';
-}
-
-/**
- * Adds zero-point replacement candidates so the assignment solver can leave
- * any slot effectively unfilled without ever preferring an ineligible player.
- */
-function withReplacementCandidates(
-  slots: string[],
-  candidates: LineupCandidate[],
-): LineupCandidate[] {
-  return [
-    ...candidates,
-    ...slots.map((slot, index) => ({
-      pid: `${DUMMY_PREFIX}${index}`,
-      group: dummyGroupForSlot(slot),
-      points: 0,
-    })),
-  ];
-}
-
-function solve(slots: string[], candidates: LineupCandidate[]): OptimalLineup {
-  return computeOptimalLineup(slots, withReplacementCandidates(slots, candidates));
-}
-
-function isRealPlayer(pid: string | null): pid is string {
-  return pid !== null && !pid.startsWith(DUMMY_PREFIX);
-}
-
-/**
- * Tukey's 1.5× IQR rule is conservative for small roster rooms: it removes
- * only statistically isolated projections rather than trimming the best and
- * worst player unconditionally. Fewer than four observations are kept intact
- * because quartiles are not stable enough to label an outlier.
- */
-export function outlierResistantMean(
+export function positionRoomScore(
   values: number[],
-  minimumSamples = 0,
-): { average: number; outliersRemoved: number } {
-  const finite = values.filter(Number.isFinite).sort((a, b) => a - b);
-  let included = finite;
-
-  if (finite.length >= 4) {
-    const q1 = quantile(finite, 0.25);
-    const q3 = quantile(finite, 0.75);
-    const iqr = q3 - q1;
-    if (iqr > 0) {
-      const lowerFence = q1 - 1.5 * iqr;
-      const upperFence = q3 + 1.5 * iqr;
-      included = finite.filter((value) => value >= lowerFence && value <= upperFence);
-    }
-  }
-
-  const padded = [...included];
-  while (padded.length < Math.max(0, Math.ceil(minimumSamples))) padded.push(0);
+  group: PositionGroup,
+): { coreAverage: number; benchAverage: number; score: number } {
+  const ranked = values
+    .filter(Number.isFinite)
+    .map((value) => Math.max(0, value))
+    .sort((a, b) => b - a);
+  const counts = POSITION_POWER_COUNTS[group];
+  const coreAverage = fixedSizeMean(ranked, counts.starters);
+  const benchAverage = fixedSizeMean(
+    ranked.slice(counts.starters),
+    counts.bench,
+  );
 
   return {
-    average: mean(padded),
-    outliersRemoved: finite.length - included.length,
+    coreAverage,
+    benchAverage,
+    score:
+      coreAverage * POSITION_STARTER_WEIGHT +
+      benchAverage * POSITION_BENCH_WEIGHT,
   };
 }
 
 export function buildPowerIndex(input: BuildPowerIndexInput): PowerIndex {
-  const { players, rosterPositions, numTeams } = input;
   const rosters = input.rosters.map((roster) => ({
     rosterId: roster.rosterId,
     playerIds: [...new Set(roster.playerIds)],
   }));
-  const slots = starterSlots(rosterPositions);
+  const slotsByGroup = new Map(
+    POSITION_GROUPS.map((group) => [
+      group,
+      POSITION_POWER_COUNTS[group].starters,
+    ]),
+  );
 
-  const leagueDepth = startingDepthByGroup(rosterPositions, numTeams);
-  const slotsByGroup = new Map<PositionGroup, number>();
-  for (const group of POSITION_GROUPS) {
-    slotsByGroup.set(group, numTeams > 0 ? (leagueDepth.get(group) ?? 0) / numTeams : 0);
-  }
-
-  const rostered = new Map<
-    PositionGroup,
-    Array<{ pid: string; projectedPpg: number; value: number | null }>
-  >();
+  const rostered = new Map<PositionGroup, Array<{ pid: string; value: number }>>();
   for (const roster of rosters) {
     for (const pid of roster.playerIds) {
-      const player = players.get(pid);
-      if (!player || player.projectedPpg === null || !Number.isFinite(player.projectedPpg)) {
+      const player = input.players.get(pid);
+      if (!player || player.value === null || !Number.isFinite(player.value)) {
         continue;
       }
       const bucket = rostered.get(player.group) ?? [];
-      bucket.push({
-        pid,
-        projectedPpg: Math.max(0, player.projectedPpg),
-        value: player.value,
-      });
+      bucket.push({ pid, value: Math.max(0, player.value) });
       rostered.set(player.group, bucket);
     }
   }
 
   const ladderByGroup = new Map<PositionGroup, PowerPlayer[]>();
   const rankByPid = new Map<string, number>();
-  for (const [group, bucket] of rostered) {
-    const ladder = bucket
-      .sort((a, b) => b.projectedPpg - a.projectedPpg || a.pid.localeCompare(b.pid))
+  for (const group of POSITION_GROUPS) {
+    const ladder = (rostered.get(group) ?? [])
+      .sort((a, b) => b.value - a.value || a.pid.localeCompare(b.pid))
       .map((entry, index) => ({ ...entry, rank: index + 1 }));
     for (const entry of ladder) rankByPid.set(entry.pid, entry.rank);
     ladderByGroup.set(group, ladder);
   }
 
   const byTeam = new Map<number, TeamPower>();
-
   for (const roster of rosters) {
-    const held = roster.playerIds.flatMap((pid): PowerPlayer[] => {
-      const player = players.get(pid);
-      if (!player || player.projectedPpg === null || !Number.isFinite(player.projectedPpg)) {
-        return [];
+    const heldByGroup = new Map<PositionGroup, PowerPlayer[]>();
+    for (const pid of roster.playerIds) {
+      const player = input.players.get(pid);
+      if (!player || player.value === null || !Number.isFinite(player.value)) {
+        continue;
       }
-      return [{
+      const bucket = heldByGroup.get(player.group) ?? [];
+      bucket.push({
         pid,
-        projectedPpg: Math.max(0, player.projectedPpg),
-        value: player.value,
+        value: Math.max(0, player.value),
         rank: rankByPid.get(pid) ?? 0,
-      }];
-    });
-    const playerByPid = new Map(held.map((player) => [player.pid, player]));
-    const candidates = held.map((player) => ({
-      pid: player.pid,
-      group: players.get(player.pid)?.group ?? null,
-      points: player.projectedPpg,
-    }));
-    const optimal = solve(slots, candidates);
-    const starterIds = new Set(optimal.assignments.map((row) => row.pid).filter(isRealPlayer));
+      });
+      heldByGroup.set(player.group, bucket);
+    }
 
     const byGroup = {} as Record<PositionGroup, PowerGroup>;
     for (const group of POSITION_GROUPS) {
-      byGroup[group] = emptyGroup(group, slotsByGroup.get(group) ?? 0);
-    }
-
-    for (const assignment of optimal.assignments) {
-      if (isRealPlayer(assignment.pid)) {
-        const player = playerByPid.get(assignment.pid);
-        const group = players.get(assignment.pid)?.group;
-        if (!player || !group) continue;
-        byGroup[group].starters.push(player);
-        byGroup[group].starterScore += player.projectedPpg;
-      } else {
-        byGroup[dummyGroupForSlot(assignment.slot)].unfilledSlots += 1;
-      }
-    }
-
-    for (const player of held) {
-      if (starterIds.has(player.pid)) continue;
-      const group = players.get(player.pid)?.group;
-      if (group) byGroup[group].depth.push(player);
-    }
-
-    for (const group of POSITION_GROUPS) {
-      byGroup[group].starters.sort(
-        (a, b) => b.projectedPpg - a.projectedPpg || a.pid.localeCompare(b.pid),
+      const counts = POSITION_POWER_COUNTS[group];
+      const ranked = (heldByGroup.get(group) ?? []).sort(
+        (a, b) => b.value - a.value || a.pid.localeCompare(b.pid),
       );
-      byGroup[group].depth.sort(
-        (a, b) => b.projectedPpg - a.projectedPpg || a.pid.localeCompare(b.pid),
+      const starters = ranked.slice(0, counts.starters);
+      const depth = ranked.slice(
+        counts.starters,
+        counts.starters + counts.bench,
       );
-      const room = outlierResistantMean(
-        [...byGroup[group].starters, ...byGroup[group].depth].map(
-          (player) => player.projectedPpg,
-        ),
-        byGroup[group].slots,
+      const room = positionRoomScore(
+        [...starters, ...depth].map((player) => player.value),
+        group,
       );
-      byGroup[group].score = room.average;
-      byGroup[group].outliersRemoved = room.outliersRemoved;
+
+      byGroup[group] = {
+        group,
+        slots: counts.starters,
+        starters,
+        depth,
+        unfilledSlots: counts.starters - starters.length,
+        ...room,
+      };
     }
 
-    byTeam.set(roster.rosterId, {
-      rosterId: roster.rosterId,
-      overall: optimal.total,
-      byGroup,
-    });
+    const overall = POSITION_GROUPS.reduce(
+      (total, group) =>
+        total + byGroup[group].score * POSITION_POWER_COUNTS[group].starters,
+      0,
+    ) / TOTAL_STARTER_SLOTS;
+
+    byTeam.set(roster.rosterId, { rosterId: roster.rosterId, overall, byGroup });
   }
 
   return { byTeam, slotsByGroup, ladderByGroup };
 }
 
-/** Scales scores so the strongest projected lineup reads 100. */
+/** Scales scores so the strongest roster reads 100. */
 export function powerIndexOf(score: number, best: number): number {
   if (!Number.isFinite(score) || best <= 0) return score > 0 ? 100 : 0;
   return Math.max(0, Math.min(100, (score / best) * 100));

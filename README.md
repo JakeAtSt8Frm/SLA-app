@@ -163,10 +163,9 @@ here — there is nothing to run the league's scoring against.
 
 ### Power rankings
 
-Overall power is the **custom-scored projected PPG of each roster's best legal
-starting lineup**. It uses the same forecast/observed-form blend as player
-valuation, then solves every Sleeper starter slot together. A player can count
-once and superflex can use any eligible position.
+Overall power is based on the app's **headline Value Scores**, rather than
+projected PPG. Each positional rating uses the fixed starter and backup counts
+below, then Overall combines those ratings in proportion to starter slots.
 
 The previous experimental VORP model applied a 35% discount to weak starters,
 guessed waiver value from the worst rostered player and added a 25% decaying
@@ -174,15 +173,24 @@ depth premium. Those constants were not learned from league results, so the
 displayed “points above replacement” did not match the math. They have been
 removed.
 
-Positional tabs answer a different question: the strength of the whole position
-room. They use the average projected PPG of every rostered player at that
-position after removing statistical outliers with Tukey's 1.5× IQR rule. At
-least the league's expected number of starters is represented, with missing
-slots counted as zero. This includes depth without reverting to a top-three-only
-view or letting one extreme projection control the result.
+Positional tabs are starter-led Value ratings. The top players receive 85% of
+the weight and a fixed number of backups supply the remaining 15%:
 
-`npm run verify:power` checks legal superflex assignment, duplicate Sleeper ids,
-missing forecasts, minimum starter depth and both high and low outlier handling.
+| Position | Starters | Bench |
+|---|---:|---:|
+| QB | 2 | 1 |
+| RB | 3 | 2 |
+| WR | 4 | 3 |
+| TE | 1 | 1 |
+| K | 1 | 1 |
+| DL | 3 | 2 |
+| LB | 4 | 3 |
+| DB | 3 | 2 |
+
+Players beyond those limits do not affect positional power. Missing configured
+slots count as zero, so a thin room cannot masquerade as a complete one.
+`npm run verify:power` checks the exact counts and weights, duplicate Sleeper
+ids, missing Value Scores, missing depth and the starter-weighted Overall score.
 
 Any player is clickable for a detail sheet with a projected-vs-actual chart, a
 full season profile, a "why this Value Score" breakdown, and a week-by-week
