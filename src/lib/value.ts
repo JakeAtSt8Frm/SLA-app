@@ -94,8 +94,8 @@ export interface WeeklyPlayerScore {
   week: number;
   actual: number;
   projected: number | null;
-  /** NFL team reported by the stat feed for this specific week. */
-  team: string | null;
+  /** Opponent reported by the stat feed for this specific week. */
+  opponent: string | null;
 }
 
 export interface ValueIndex {
@@ -308,7 +308,12 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
       // otherwise every unprojected week would register as a boom.
       const projLine = projections[pid];
       const projected = hasValidProjection(projLine) ? score(projLine) : null;
-      a.weeklyDetail.push({ week, actual, projected, team: teams[pid] ?? null });
+      a.weeklyDetail.push({
+        week,
+        actual,
+        projected,
+        opponent: opponents[pid] ?? null,
+      });
 
       if (projected !== null && projected > 0) {
         a.projGames += 1;
