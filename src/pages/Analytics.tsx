@@ -154,13 +154,11 @@ export function AnalyticsPage() {
   }, [data]);
 
   /**
-   * Roster power, in points per week above a replacement-level roster.
+   * Forward-looking roster power from the best legal projected lineup.
    *
-   * The model and the reasoning behind measuring this in points rather than in
-   * averaged Value Scores live in `lib/power.ts`. Here we only feed it: every
-   * player a team holds — starters, bench, taxi and reserve — with the VORP the
-   * dynasty index already computed against this league's real starting
-   * requirements.
+   * The projection is the same custom-scored blend used by player valuation.
+   * Every held player is available to the exact lineup solver, including taxi
+   * and reserve, but can fill at most one eligible starting slot.
    */
   const powerIndex = useMemo(
     () =>
@@ -180,7 +178,7 @@ export function AnalyticsPage() {
             pid,
             {
               group: dynasty.group,
-              vorp: dynasty.breakdown.vorp,
+              projectedPpg: dynasty.breakdown.blendedPpg,
               value: data.combinedScores.get(pid) ?? null,
             },
           ]),
@@ -198,6 +196,8 @@ export function AnalyticsPage() {
       return {
         team,
         value: powerScope === 'ALL' ? (teamPower?.overall ?? 0) : (group?.score ?? 0),
+        depthDrop:
+          powerScope === 'ALL' ? (teamPower?.depthDrop ?? 0) : (group?.depthDrop ?? 0),
         group,
       };
     });
@@ -207,14 +207,15 @@ export function AnalyticsPage() {
     // point apart round to the same tenth and would otherwise be listed in an
     // order that contradicts the index shown beside them.
     return rows
-      .map(({ team, value, group }) => ({
+      .map(({ team, value, depthDrop, group }) => ({
         ...team,
         score: value,
         powerIndex: round(powerIndexOf(value, best), 1),
         powerPoints: round(value, 1),
+        depthDrop: round(depthDrop, 1),
         detail: group,
       }))
-      .sort((a, b) => b.score - a.score);
+      .sort((a, b) => b.score - a.score || a.depthDrop - b.depthDrop);
   }, [powerScope, standings, powerIndex]);
 
   const weeklyRanks = useMemo(() => {
@@ -427,18 +428,18 @@ export function AnalyticsPage() {
           <div className="group-head group-head--primary">
             <span>Power rankings</span>
             <span className="mono">
-              {powerScope === 'ALL' ? 'Overall' : powerScope}
+              {powerScope === 'ALL' ? 'Overall · projected PPG' : `${powerScope} · PPG`}
             </span>
           </div>
           <p id="power-formula" className="sr-only">
             {powerScope === 'ALL'
-              ? 'Overall power is the points per week a roster is worth above a replacement-level roster, summed over every starting slot the league fields. The bar is scaled so the strongest roster reads 100.'
-              : `${powerScope} power is the points per week a team's ${powerScope}s are worth above replacement across the ${fmtSlots(powerIndex.slotsByGroup.get(powerScope) ?? 0)} this league starts, plus a discounted premium for bench depth behind them. The bar is scaled so the strongest reads 100.`}
+              ? 'Overall power is the custom-scored projected points per game of each roster’s best legal starting lineup. The bar is scaled so the strongest roster reads 100.'
+              : `${powerScope} power is the custom-scored projected points per game contributed by a team’s ${powerScope}s in its best legal lineup. The bar is scaled so the strongest reads 100.`}
           </p>
           <p className="card-pad tiny muted" style={{ paddingBottom: 0 }}>
             {powerScope === 'ALL'
-              ? 'Points per week above a replacement-level roster, across all 21 starting slots.'
-              : `Points per week above replacement from the ${fmtSlots(powerIndex.slotsByGroup.get(powerScope) ?? 0)} this league starts at ${powerScope}, plus bench insurance.`}
+              ? 'Best legal projected lineup in custom-scored PPG. Depth is shown as the average drop if one starter is unavailable; it does not receive a subjective bonus.'
+              : `Projected PPG from ${powerScope}s assigned to the best legal lineup (${fmtSlots(powerIndex.slotsByGroup.get(powerScope) ?? 0)} expected slots per team).`}
           </p>
           <div className="card-pad power-controls">
             <div className="segmented" role="group" aria-label="Power ranking scope">
@@ -492,26 +493,30 @@ export function AnalyticsPage() {
                   </span>
                   <span
                     className="power-value mono bold"
-                    title={`${fmtSigned(team.powerPoints)} pts/wk above replacement`}
+                    title={`${team.powerPoints.toFixed(1)} projected points per game`}
                   >
-                    {team.powerIndex.toFixed(1)}
+                    {team.powerPoints.toFixed(1)}
                   </span>
-                  {team.detail && (
-                    <span className="power-why tiny muted">
-                      {team.detail.starters.length > 0
-                        ? team.detail.starters
-                            .map(
-                              (starter) =>
-                                `${playerLabel(data, starter.pid)} ${powerScope} #${starter.rank} (${fmtSigned(starter.vorp)})`,
-                            )
-                            .join(' · ')
-                        : `no ${powerScope} rostered`}
-                      {team.detail.unfilledSlots > 0.01 &&
-                        ` · ${fmtSlots(team.detail.unfilledSlots)} unfilled`}
-                      {team.detail.depthScore > 0.05 &&
-                        ` · +${team.detail.depthScore.toFixed(1)} depth`}
-                    </span>
-                  )}
+                  <span className="power-why tiny muted">
+                    {team.detail ? (
+                      <>
+                        {team.detail.starters.length > 0
+                          ? team.detail.starters
+                              .map(
+                                (starter) =>
+                                  `${playerLabel(data, starter.pid)} ${powerScope} #${starter.rank} (${starter.projectedPpg.toFixed(1)})`,
+                              )
+                              .join(' · ')
+                          : `no ${powerScope} rostered`}
+                        {team.detail.unfilledSlots > 0.01 &&
+                          ` · ${fmtSlots(team.detail.unfilledSlots)} unfilled`}
+                      </>
+                    ) : (
+                      'Best legal lineup'
+                    )}
+                    {team.depthDrop > 0.05 &&
+                      ` · avg starter absence −${team.depthDrop.toFixed(1)} PPG`}
+                  </span>
                 </div>
               );
             })}

@@ -1,16 +1,14 @@
 /**
- * Checks the roster power model.
+ * Regression checks for the forward-looking power model.
  *
- * The headline case is the one that exposed the old model: at tight end, where
- * this league starts exactly one, the team holding the best tight end in the
- * league must rank first — and must not be overtaken by a team that merely
- * rosters four mediocre ones.
+ * These tests pin observable rules rather than tuning constants: use the
+ * league's exact legal lineup, count each player once, rank on projected custom
+ * PPG, and keep bench resilience separate from the headline score.
  */
 
 import assert from 'node:assert/strict';
 
 import {
-  BELOW_REPLACEMENT_DISCOUNT,
   buildPowerIndex,
   powerIndexOf,
   type PowerPlayerInput,
@@ -25,8 +23,15 @@ const ROSTER_POSITIONS = [
 ];
 const NUM_TEAMS = 6;
 
+function player(
+  group: PositionGroup,
+  projectedPpg: number | null,
+): PowerPlayerInput {
+  return { group, projectedPpg, value: null };
+}
+
 /* -------------------------------------------------------------------------- */
-/* Starting slots come from the league's own lineup                            */
+/* Starting requirements come from the league's own lineup                    */
 /* -------------------------------------------------------------------------- */
 
 const empty = buildPowerIndex({
@@ -40,31 +45,26 @@ assert.equal(empty.slotsByGroup.get('LB'), 4, 'and four linebackers');
 assert.equal(
   empty.slotsByGroup.get('QB'),
   2,
-  'and two quarterbacks, because superflex is a quarterback slot in practice',
+  'and projects two quarterbacks because superflex is normally filled by a QB',
 );
 assert.equal(empty.slotsByGroup.get('K'), 1);
 
 /* -------------------------------------------------------------------------- */
-/* Tight end: one slot, so the best tight end decides it                       */
+/* One TE slot: the best projected starter leads                              */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Real 2026 numbers, VORP in points per week against a tight end replacement
- * level of 11.1. rbeans26 holds Trey McBride, the best tight end in the league;
- * david0929 holds four tight ends, none better than replacement.
- */
 const TE_ROSTERS: Record<string, Array<[string, number]>> = {
-  rbeans26: [['mcbride', 5.4], ['laporta', -0.1], ['otton', -2.6], ['johnson', -4.8]],
-  jake: [['bowers', 3.7], ['ferguson', -1.6], ['kraft', -0.5]],
-  larv: [['kittle', 2.0], ['kelce', 0.1], ['loveland', -0.3], ['freiermuth', -3.0]],
-  david: [['fannin', 0.1], ['pitts', -0.8], ['goedert', -0.4], ['okonkwo', -3.7]],
-  mark: [['warren', 0], ['andrews', -1.6], ['schultz', -2.4], ['likely', -4.0]],
-  sam: [['kincaid', -2.4], ['gadsden', -2.6]],
+  rbeans26: [['mcbride', 16.5], ['laporta', 11.0], ['otton', 8.5], ['johnson', 6.3]],
+  jake: [['bowers', 14.8], ['ferguson', 9.5], ['kraft', 10.6]],
+  larv: [['kittle', 13.0], ['kelce', 11.2], ['loveland', 10.8]],
+  david: [['fannin', 11.2], ['pitts', 10.3], ['goedert', 10.7]],
+  mark: [['warren', 11.1], ['andrews', 9.5], ['schultz', 8.7]],
+  sam: [['kincaid', 8.7], ['gadsden', 8.5]],
 };
 
 const tePlayers = new Map<string, PowerPlayerInput>();
-const teRosters = Object.entries(TE_ROSTERS).map(([team, players], index) => {
-  for (const [pid, vorp] of players) tePlayers.set(pid, { group: 'TE', vorp, value: null });
+const teRosters = Object.entries(TE_ROSTERS).map(([, players], index) => {
+  for (const [pid, ppg] of players) tePlayers.set(pid, player('TE', ppg));
   return { rosterId: index + 1, playerIds: players.map(([pid]) => pid) };
 });
 const teamIdByName = new Map(
@@ -74,193 +74,130 @@ const teamIdByName = new Map(
 const te = buildPowerIndex({
   rosters: teRosters,
   players: tePlayers,
-  rosterPositions: ROSTER_POSITIONS,
+  rosterPositions: ['TE'],
   numTeams: NUM_TEAMS,
 });
-
 const teOrder = [...te.byTeam.values()]
-  .map((team) => ({ team, score: team.byGroup.TE.score }))
-  .sort((a, b) => b.score - a.score)
-  .map((row) => row.team.rosterId);
+  .sort((a, b) => b.byGroup.TE.score - a.byGroup.TE.score)
+  .map((team) => team.rosterId);
 
-assert.equal(
-  teOrder[0],
-  teamIdByName.get('rbeans26'),
-  'The team with the best tight end must rank first at a one-slot position',
-);
+assert.equal(teOrder[0], teamIdByName.get('rbeans26'));
 assert.equal(teOrder[1], teamIdByName.get('jake'));
-assert.equal(teOrder[2], teamIdByName.get('larv'));
-assert.equal(
-  teOrder[teOrder.length - 1],
-  teamIdByName.get('sam'),
-  'and the team with no startable tight end must rank last',
-);
+assert.equal(teOrder[teOrder.length - 1], teamIdByName.get('sam'));
 
 const rbeansTe = te.byTeam.get(teamIdByName.get('rbeans26')!)!.byGroup.TE;
-assert.equal(rbeansTe.starters.length, 1, 'One slot means one starter counts');
+assert.equal(rbeansTe.starters.length, 1, 'One TE slot means one starter counts');
 assert.equal(rbeansTe.starters[0].pid, 'mcbride');
-assert.equal(rbeansTe.starters[0].rank, 1, 'McBride is TE #1 across every roster');
+assert.equal(rbeansTe.starters[0].rank, 1);
 assert.equal(rbeansTe.depth.length, 3);
-assert.equal(
-  rbeansTe.depthScore,
-  0,
-  'Three below-replacement backups add nothing, and must not subtract either',
-);
-assert.equal(rbeansTe.starterScore, 5.4);
+assert.equal(rbeansTe.score, 16.5, 'Backup quantity does not inflate projected lineup PPG');
 
 /* -------------------------------------------------------------------------- */
-/* A single dud cannot drag a team down                                        */
+/* The legal lineup is optimized globally, including flex                     */
 /* -------------------------------------------------------------------------- */
 
-/** Michael Badgley, projected 4.3 against a kicker replacement level of 8.5. */
-const BADGLEY: [string, number] = ['badgley', -4.2];
-
-const withDud = buildPowerIndex({
-  rosters: [
-    { rosterId: 1, playerIds: ['aubrey', 'badgley'] },
-    { rosterId: 2, playerIds: ['aubrey2'] },
-  ],
+const flexible = buildPowerIndex({
+  rosters: [{ rosterId: 1, playerIds: ['qb1', 'qb2', 'rb1'] }],
   players: new Map<string, PowerPlayerInput>([
-    ['aubrey', { group: 'K', vorp: 1.2, value: null }],
-    [BADGLEY[0], { group: 'K', vorp: BADGLEY[1], value: null }],
-    ['aubrey2', { group: 'K', vorp: 1.2, value: null }],
+    ['qb1', player('QB', 20)],
+    ['qb2', player('QB', 18)],
+    ['rb1', player('RB', 19)],
   ]),
-  rosterPositions: ROSTER_POSITIONS,
-  numTeams: NUM_TEAMS,
+  rosterPositions: ['QB', 'SUPER_FLEX'],
+  numTeams: 1,
 });
 assert.equal(
-  withDud.byTeam.get(1)!.byGroup.K.score,
-  withDud.byTeam.get(2)!.byGroup.K.score,
-  'Rostering an extra terrible kicker behind a good one must change nothing',
+  flexible.byTeam.get(1)!.overall,
+  39,
+  'The solver must choose QB 20 + RB 19, not assume superflex is always QB',
 );
-
-/** But if the dud is the only kicker, he is the starter and does count. */
-const dudOnly = buildPowerIndex({
-  rosters: [{ rosterId: 1, playerIds: ['badgley'] }],
-  players: new Map<string, PowerPlayerInput>([
-    ['badgley', { group: 'K', vorp: -4.2, value: null }],
-  ]),
-  rosterPositions: ROSTER_POSITIONS,
-  numTeams: NUM_TEAMS,
-});
-assert.equal(
-  Number(dudOnly.byTeam.get(1)!.byGroup.K.score.toFixed(3)),
-  Number((-4.2 * BELOW_REPLACEMENT_DISCOUNT).toFixed(3)),
-  'A below-replacement starter costs a discounted share of his deficit',
+assert.deepEqual(
+  flexible.byTeam.get(1)!.byGroup.QB.starters.map((entry) => entry.pid),
+  ['qb1'],
+);
+assert.deepEqual(
+  flexible.byTeam.get(1)!.byGroup.RB.starters.map((entry) => entry.pid),
+  ['rb1'],
 );
 
 /* -------------------------------------------------------------------------- */
-/* An injured player is listed twice by Sleeper, and must still count once      */
+/* Sleeper duplicate ids cannot fill multiple slots                           */
 /* -------------------------------------------------------------------------- */
 
 const duplicated = buildPowerIndex({
-  // `players` and `reserve` both carry a player on IR.
   rosters: [{ rosterId: 1, playerIds: ['burrow', 'burrow'] }],
-  players: new Map<string, PowerPlayerInput>([
-    ['burrow', { group: 'QB', vorp: 1.9, value: null }],
-  ]),
-  rosterPositions: ROSTER_POSITIONS,
-  numTeams: NUM_TEAMS,
+  players: new Map<string, PowerPlayerInput>([['burrow', player('QB', 20)]]),
+  rosterPositions: ['QB', 'SUPER_FLEX'],
+  numTeams: 1,
 });
-const duplicatedQb = duplicated.byTeam.get(1)!.byGroup.QB;
-assert.equal(
-  duplicatedQb.starters.length,
-  1,
-  'One quarterback cannot fill both superflex slots by being listed twice',
-);
-assert.equal(duplicatedQb.unfilledSlots, 1);
+assert.equal(duplicated.byTeam.get(1)!.overall, 20);
+assert.equal(duplicated.byTeam.get(1)!.byGroup.QB.starters.length, 1);
+assert.equal(duplicated.byTeam.get(1)!.byGroup.QB.unfilledSlots, 1);
 
 /* -------------------------------------------------------------------------- */
-/* An empty slot is worse than a weak one                                      */
-/* -------------------------------------------------------------------------- */
-
-const shortHanded = buildPowerIndex({
-  rosters: [
-    { rosterId: 1, playerIds: ['lb1', 'lb2', 'lb3', 'lb4weak'] },
-    { rosterId: 2, playerIds: ['lb1b', 'lb2b', 'lb3b'] },
-    { rosterId: 3, playerIds: ['lb1c', 'lb2c', 'lb3c', 'lbworst'] },
-  ],
-  players: new Map<string, PowerPlayerInput>([
-    ['lb1', { group: 'LB', vorp: 3, value: null }],
-    ['lb2', { group: 'LB', vorp: 2, value: null }],
-    ['lb3', { group: 'LB', vorp: 1, value: null }],
-    ['lb4weak', { group: 'LB', vorp: -1, value: null }],
-    ['lb1b', { group: 'LB', vorp: 3, value: null }],
-    ['lb2b', { group: 'LB', vorp: 2, value: null }],
-    ['lb3b', { group: 'LB', vorp: 1, value: null }],
-    ['lb1c', { group: 'LB', vorp: 3, value: null }],
-    ['lb2c', { group: 'LB', vorp: 2, value: null }],
-    ['lb3c', { group: 'LB', vorp: 1, value: null }],
-    ['lbworst', { group: 'LB', vorp: -5, value: null }],
-  ]),
-  rosterPositions: ROSTER_POSITIONS,
-  numTeams: NUM_TEAMS,
-});
-assert.equal(shortHanded.byTeam.get(2)!.byGroup.LB.unfilledSlots, 1);
-assert(
-  shortHanded.byTeam.get(1)!.byGroup.LB.score > shortHanded.byTeam.get(2)!.byGroup.LB.score,
-  'A weak fourth linebacker must beat no fourth linebacker at all',
-);
-
-/* -------------------------------------------------------------------------- */
-/* Scarcity is intrinsic: slots and points, not a bolted-on multiplier         */
-/* -------------------------------------------------------------------------- */
-
-const scarcity = buildPowerIndex({
-  rosters: [{ rosterId: 1, playerIds: ['qb1', 'qb2', 'k1'] }],
-  players: new Map<string, PowerPlayerInput>([
-    ['qb1', { group: 'QB', vorp: 6, value: null }],
-    ['qb2', { group: 'QB', vorp: 4, value: null }],
-    ['k1', { group: 'K', vorp: 6, value: null }],
-  ]),
-  rosterPositions: ROSTER_POSITIONS,
-  numTeams: NUM_TEAMS,
-});
-assert.equal(
-  scarcity.byTeam.get(1)!.byGroup.QB.score,
-  10,
-  'Superflex starts two quarterbacks, so both count in full',
-);
-assert.equal(
-  scarcity.byTeam.get(1)!.byGroup.K.score,
-  6,
-  'One kicker slot counts one kicker, however good he is',
-);
-assert.equal(scarcity.byTeam.get(1)!.overall, 16);
-
-/* -------------------------------------------------------------------------- */
-/* Missing VORP is replacement level, never a hole                             */
+/* Missing forecasts are unknown, not invented replacement-level starters     */
 /* -------------------------------------------------------------------------- */
 
 const unrated = buildPowerIndex({
   rosters: [{ rosterId: 1, playerIds: ['rookie'] }],
-  players: new Map<string, PowerPlayerInput>([
-    ['rookie', { group: 'DL', vorp: null, value: null }],
-  ]),
-  rosterPositions: ROSTER_POSITIONS,
-  numTeams: NUM_TEAMS,
+  players: new Map<string, PowerPlayerInput>([['rookie', player('DL', null)]]),
+  rosterPositions: ['DL'],
+  numTeams: 1,
 });
-assert.equal(
-  unrated.byTeam.get(1)!.byGroup.DL.starters[0].vorp,
-  0,
-  'A player with no forecast is read as replacement level, not as a negative',
-);
+assert.equal(unrated.byTeam.get(1)!.overall, 0);
+assert.equal(unrated.byTeam.get(1)!.byGroup.DL.starters.length, 0);
+assert.equal(unrated.byTeam.get(1)!.byGroup.DL.unfilledSlots, 1);
 
 /* -------------------------------------------------------------------------- */
-/* Indexing                                                                    */
+/* Depth is measured as resilience and cannot secretly reorder starter power  */
 /* -------------------------------------------------------------------------- */
 
-assert.equal(powerIndexOf(12, 24), 50);
-assert.equal(powerIndexOf(24, 24), 100);
-assert.equal(powerIndexOf(-3, 24), 0, 'A negative roster reads zero, never a negative bar');
+const depth = buildPowerIndex({
+  rosters: [
+    { rosterId: 1, playerIds: ['te1', 'deepBackup'] },
+    { rosterId: 2, playerIds: ['te2', 'thinBackup'] },
+  ],
+  players: new Map<string, PowerPlayerInput>([
+    ['te1', player('TE', 16)],
+    ['deepBackup', player('TE', 14)],
+    ['te2', player('TE', 16)],
+    ['thinBackup', player('TE', 8)],
+  ]),
+  rosterPositions: ['TE'],
+  numTeams: 2,
+});
+assert.equal(depth.byTeam.get(1)!.overall, 16);
+assert.equal(depth.byTeam.get(2)!.overall, 16);
+assert.equal(depth.byTeam.get(1)!.depthDrop, 2);
+assert.equal(depth.byTeam.get(2)!.depthDrop, 8);
+
+/* -------------------------------------------------------------------------- */
+/* Every positional contribution adds back to the exact projected total       */
+/* -------------------------------------------------------------------------- */
+
+const full = buildPowerIndex({
+  rosters: [{ rosterId: 1, playerIds: ['qb', 'rb', 'wr', 'te'] }],
+  players: new Map<string, PowerPlayerInput>([
+    ['qb', player('QB', 22)],
+    ['rb', player('RB', 17)],
+    ['wr', player('WR', 18)],
+    ['te', player('TE', 12)],
+  ]),
+  rosterPositions: ['QB', 'RB', 'WR', 'TE'],
+  numTeams: 1,
+});
+const positionalTotal = (['QB', 'RB', 'WR', 'TE', 'K', 'DL', 'LB', 'DB'] as PositionGroup[])
+  .reduce((sum, group) => sum + full.byTeam.get(1)!.byGroup[group].score, 0);
+assert.equal(full.byTeam.get(1)!.overall, 69);
+assert.equal(positionalTotal, full.byTeam.get(1)!.overall);
+
+/* -------------------------------------------------------------------------- */
+/* Display index                                                               */
+/* -------------------------------------------------------------------------- */
+
+assert.equal(powerIndexOf(240, 300), 80);
+assert.equal(powerIndexOf(300, 300), 100);
+assert.equal(powerIndexOf(-3, 300), 0);
 assert.equal(powerIndexOf(0, 0), 0);
-
-const groups: PositionGroup[] = ['QB', 'RB', 'WR', 'TE', 'K', 'DL', 'LB', 'DB'];
-for (const group of groups) {
-  assert(
-    te.byTeam.get(1)!.byGroup[group] !== undefined,
-    `Every position group must be present in the breakdown (${group})`,
-  );
-}
 
 console.log('Roster power checks passed.');
