@@ -19,7 +19,11 @@ import {
 import { LazyWeeklyTeamRankChart } from '../components/LazyChart';
 import { useTheme } from '../components/ThemeProvider';
 import { teamColor } from '../lib/colors';
-import { buildPowerIndex, powerIndexOf } from '../lib/power';
+import {
+  buildPowerIndex,
+  POSITION_POWER_COUNTS,
+  powerIndexOf,
+} from '../lib/power';
 import { mean, quantile, round, stdev } from '../lib/stats';
 import { POSITION_GROUPS, type PositionGroup } from '../lib/types';
 
@@ -138,11 +142,10 @@ export function AnalyticsPage() {
   }, [data]);
 
   /**
-   * Forward-looking roster power from the best legal projected lineup.
+   * Forward-looking roster power from the app's headline Value Scores.
    *
-   * The projection is the same custom-scored blend used by player valuation.
-   * Every held player is available to the exact lineup solver, including taxi
-   * and reserve, but can fill at most one eligible starting slot.
+   * Every held player is considered, including taxi and reserve. Each position
+   * uses its configured starter core plus a lightly weighted group of backups.
    */
   const powerIndex = useMemo(
     () =>
@@ -158,17 +161,13 @@ export function AnalyticsPage() {
             .map(String),
         })),
         players: new Map(
-          [...data.dynastyIndex.byPlayer].map(([pid, dynasty]) => [
-            pid,
-            {
-              group: dynasty.group,
-              projectedPpg: dynasty.breakdown.blendedPpg,
-              value: data.combinedScores.get(pid) ?? null,
-            },
-          ]),
+          [...data.combinedScores].flatMap(([pid, value]) => {
+            const group =
+              data.dynastyIndex.byPlayer.get(pid)?.group ??
+              data.valueIndex.byPlayer.get(pid)?.group;
+            return group ? [[pid, { group, value }] as const] : [];
+          }),
         ),
-        rosterPositions: data.league.roster_positions ?? [],
-        numTeams: data.league.total_rosters ?? data.teams.length,
       }),
     [data],
   );
@@ -407,18 +406,15 @@ export function AnalyticsPage() {
           <div className="group-head group-head--primary">
             <span>Power rankings</span>
             <span className="mono">
-              {powerScope === 'ALL' ? 'Overall · projected PPG' : `${powerScope} · robust avg`}
+              {powerScope === 'ALL'
+                ? 'Overall · Value'
+                : `${powerScope} · ${POSITION_POWER_COUNTS[powerScope].starters} + ${POSITION_POWER_COUNTS[powerScope].bench} depth`}
             </span>
           </div>
           <p id="power-formula" className="sr-only">
             {powerScope === 'ALL'
-              ? 'Overall power is the custom-scored projected points per game of each roster’s best legal starting lineup. The bar is scaled so the strongest roster reads 100.'
-              : `${powerScope} power is the outlier-resistant average custom-scored projection across every rostered ${powerScope}. The bar is scaled so the strongest reads 100.`}
-          </p>
-          <p className="card-pad tiny muted" style={{ paddingBottom: 0 }}>
-            {powerScope === 'ALL'
-              ? 'Best legal projected lineup in custom-scored PPG.'
-              : `Average projected PPG across the full ${powerScope} room after excluding statistical outliers.`}
+              ? 'Overall power combines the position ratings from each roster’s Value Scores, weighted by starter count. The bar is scaled so the strongest roster reads 100.'
+              : `${powerScope} power gives 85 percent of its weight to the top ${POSITION_POWER_COUNTS[powerScope].starters} ${powerScope} Value Scores and 15 percent to the next ${POSITION_POWER_COUNTS[powerScope].bench}. The bar is scaled so the strongest reads 100.`}
           </p>
           <div className="card-pad power-controls">
             <div className="segmented" role="group" aria-label="Power ranking scope">
@@ -472,7 +468,7 @@ export function AnalyticsPage() {
                   </span>
                   <span
                     className="power-value mono bold"
-                    title={`${team.powerPoints.toFixed(1)} projected points per game`}
+                    title={`${team.powerPoints.toFixed(1)} Value-based power score`}
                   >
                     {team.powerPoints.toFixed(1)}
                   </span>
