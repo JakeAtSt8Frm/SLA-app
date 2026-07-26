@@ -137,18 +137,23 @@ export function buildRosterWeek(
    */
   const useMatchupLineup = !data.rostersOverridden;
 
-  const starterIds = clean(
-    useMatchupLineup ? (matchup?.starters ?? team.roster.starters) : team.roster.starters,
-  );
+  const starterLineup = useMatchupLineup
+    ? (matchup?.starters ?? team.roster.starters)
+    : team.roster.starters;
+  const slots = data.starterSlots;
+  const starterEntries = (starterLineup ?? []).flatMap((raw, i) => {
+    const pid = String(raw ?? '');
+    return pid && pid !== '0' ? [{ pid, slot: slots[i] ?? 'ST' }] : [];
+  });
+  const starterIds = starterEntries.map(({ pid }) => pid);
   const allIds = clean(
     useMatchupLineup ? (matchup?.players ?? team.roster.players) : team.roster.players,
   );
 
-  const slots = data.starterSlots;
   const starterSet = new Set(starterIds);
 
-  const starters = starterIds.map((pid, i) =>
-    enrichPlayer(data, pid, week, slots[i] ?? 'ST', true),
+  const starters = starterEntries.map(({ pid, slot }) =>
+    enrichPlayer(data, pid, week, slot, true),
   );
 
   // Bench, taxi and IR all live in separate arrays that can overlap; de-dupe
