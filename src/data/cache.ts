@@ -130,6 +130,8 @@ export const TTL = {
   LEAGUE: 60 * 60 * 1000,
   /** Rosters change on waivers and trades. */
   ROSTERS: 5 * 60 * 1000,
+  /** Preseason totals move with depth charts, injuries and roster changes. */
+  SEASON_PROJECTIONS: 6 * 60 * 60 * 1000,
   /** NFL state drives the current week — check often but not every render. */
   STATE: 5 * 60 * 1000,
 } as const;

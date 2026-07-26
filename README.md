@@ -58,12 +58,15 @@ comparable across positions.
   the rest. This half is age- and market-blind: pure "producing now".
 
 - *Dynasty half* answers "what should this player be worth to hold". Its lead
-  signal is multi-year **VORP** — production blended 80% the current season and
-  20% the prior two (scored in *this* league's format), minus the group's real
-  replacement level from the league's actual superflex/IDP starting
-  requirements. On top of it: a position-specific age/longevity curve, role and
-  usage, value insulation, efficiency, availability, and — the one thing Sleeper
-  can't provide — the current trade market from
+  signal is multi-year **VORP** — observed production blended across the current
+  and prior two seasons, plus Sleeper's current full-season stat projection
+  scored in *this* league's format. The projection is 40% of the production
+  blend before a player records a game and fades to 15% after six games; it is
+  never added to actual points. VORP then subtracts the group's real replacement
+  level from the league's actual superflex/IDP starting requirements. On top of
+  it: a position-specific age/longevity curve, projected or observed role and
+  usage, value insulation, efficiency, availability, and — the one thing
+  Sleeper can't provide — the current trade market from
   [FantasyCalc](https://fantasycalc.com) (superflex- and size-matched, keyed by
   Sleeper id). The gap between the intrinsic dynasty score and the market price
   surfaces in the player sheet as a **Buy-low / Sell-high / Fair** verdict,
@@ -163,8 +166,8 @@ needs changing even if the format does.
 
 A full season is ~11MB of JSON (17 weeks × stats + projections, plus a 2.5MB
 player dictionary). It's cached in IndexedDB with per-payload TTLs: completed
-weeks for 30 days, the live week for 2 minutes. Recharts is code-split, keeping
-first paint to ~98KB gzipped.
+weeks for 30 days, the live week for 2 minutes, and the current season projection
+for 6 hours. Recharts is code-split, keeping first paint to ~98KB gzipped.
 
 Team-week views are memoized for the lifetime of a loaded season, so pages that
 share optimal-lineup, history and analytics data reuse the same derived result

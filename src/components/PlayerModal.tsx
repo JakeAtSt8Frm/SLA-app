@@ -266,7 +266,21 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                   <Metric
                     label="Blended PPG"
                     value={fmt1(dynasty.breakdown.blendedPpg)}
-                    sub="80% now / 20% prior"
+                    sub="history + fading season forecast"
+                  />
+                )}
+                {dynasty.breakdown.projectedSeasonPoints !== null && (
+                  <Metric
+                    label="Season projection"
+                    value={fmt1(dynasty.breakdown.projectedSeasonPoints)}
+                    sub="Sleeper stats · custom scoring"
+                  />
+                )}
+                {dynasty.breakdown.projectedPpg !== null && (
+                  <Metric
+                    label="Projected PPG"
+                    value={fmt1(dynasty.breakdown.projectedPpg)}
+                    sub={`${fmtPct(dynasty.breakdown.projectionWeight)} of production blend`}
                   />
                 )}
                 {dynasty.breakdown.currentPpg !== null && (

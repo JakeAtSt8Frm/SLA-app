@@ -377,18 +377,21 @@ export function rosteredIds(data: LeagueData): Set<string> {
 /**
  * Available free agents, ranked by Value Score.
  *
- * Restricted to players who have actually recorded a scoring week, since the
- * full Sleeper dictionary contains thousands of practice-squad entries that
- * would otherwise swamp the list.
+ * Restricted to players with a computed current value. Before Week 1 this
+ * includes players with meaningful custom-scored season projections.
  */
 export function freeAgents(data: LeagueData, group: PositionGroup | 'ALL'): EnrichedPlayer[] {
   const owned = rosteredIds(data);
   const out: EnrichedPlayer[] = [];
 
-  for (const [pid, value] of data.valueIndex.byPlayer) {
+  for (const [pid] of data.combinedScores) {
     if (owned.has(pid)) continue;
-    if (group !== 'ALL' && value.group !== group) continue;
-    out.push(enrichPlayer(data, pid, data.currentWeek, value.group, false));
+    const playerGroup =
+      data.valueIndex.byPlayer.get(pid)?.group ??
+      data.dynastyIndex.byPlayer.get(pid)?.group ??
+      null;
+    if (!playerGroup || (group !== 'ALL' && playerGroup !== group)) continue;
+    out.push(enrichPlayer(data, pid, data.currentWeek, playerGroup, false));
   }
 
   return out.sort((a, b) => (b.valueScore ?? 0) - (a.valueScore ?? 0));

@@ -212,6 +212,28 @@ export async function getWeekProjections(
   return normalizeWeekPayload(raw);
 }
 
+/**
+ * Sleeper's season-long projection feed.
+ *
+ * This endpoint is not part of Sleeper's documented v1 API, so callers must
+ * treat it as best-effort. Its payload matches the weekly projection shape but
+ * carries full-season stat totals and no week.
+ */
+export async function getSeasonProjections(
+  season: string,
+  signal?: AbortSignal,
+): Promise<WeekStatsResult> {
+  const query = '?season_type=regular';
+  const raw = await getFirst<unknown>(
+    [
+      `${APP}/projections/nfl/${season}${query}`,
+      `${COM}/projections/nfl/${season}${query}`,
+    ],
+    signal,
+  );
+  return normalizeWeekPayload(raw);
+}
+
 /* -------------------------------------------------------------------------- */
 /* Asset URLs                                                                  */
 /* -------------------------------------------------------------------------- */
