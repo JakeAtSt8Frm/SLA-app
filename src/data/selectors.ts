@@ -368,15 +368,31 @@ export function buildRankHeatmap(rows: HeatmapRow[]): HeatmapRow[] {
 /* Free agents                                                                 */
 /* -------------------------------------------------------------------------- */
 
+export interface RosterOwner {
+  rosterId: number;
+  name: string;
+}
+
+/** Current fantasy-roster owner for every active, taxi and reserve player. */
+export function rosterOwnerByPlayer(teams: readonly TeamInfo[]): Map<string, RosterOwner> {
+  const owners = new Map<string, RosterOwner>();
+
+  for (const team of teams) {
+    const owner = { rosterId: team.rosterId, name: team.name };
+    for (const ids of [team.roster.players, team.roster.taxi, team.roster.reserve]) {
+      for (const raw of ids ?? []) {
+        const pid = String(raw ?? '');
+        if (pid && pid !== '0') owners.set(pid, owner);
+      }
+    }
+  }
+
+  return owners;
+}
+
 /** Every player id currently rostered by anybody in the league. */
 export function rosteredIds(data: LeagueData): Set<string> {
-  const owned = new Set<string>();
-  for (const team of data.teams) {
-    for (const pid of team.roster.players ?? []) if (pid) owned.add(String(pid));
-    for (const pid of team.roster.taxi ?? []) if (pid) owned.add(String(pid));
-    for (const pid of team.roster.reserve ?? []) if (pid) owned.add(String(pid));
-  }
-  return owned;
+  return new Set(rosterOwnerByPlayer(data.teams).keys());
 }
 
 /**
