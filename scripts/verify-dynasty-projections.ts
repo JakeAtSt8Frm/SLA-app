@@ -5,6 +5,7 @@ import {
   buildDynastyIndex,
   IN_SEASON_PROJECTION_WEIGHT,
   PRESEASON_PROJECTION_WEIGHT,
+  type ProjectionSource,
   seasonProjectionWeight,
   type SeasonProjectionMap,
 } from '../src/lib/dynasty';
@@ -58,6 +59,13 @@ const projections: SeasonProjectionMap = new Map([
       ppg: 240 / 17,
       games: 17,
       usagePerGame: 6,
+      sources: [
+        {
+          name: 'Sleeper',
+          total: 240,
+          ppg: 240 / 17,
+        } satisfies ProjectionSource,
+      ],
     },
   ],
 ]);

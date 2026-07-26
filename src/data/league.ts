@@ -33,9 +33,11 @@ import { buildValueIndex, type ValueIndex } from '../lib/value';
 import {
   buildDynastyIndex,
   type DynastyIndex,
+  type ProjectionSource,
   type SeasonPpg,
   type SeasonProjectionMap,
 } from '../lib/dynasty';
+import { getFftodaySnapshot, matchFftodayProjections } from '../lib/fftoday';
 import { getMarketValues, marketQueryFromLeague } from '../lib/market';
 import { buildMatchupIndex, type MatchupIndex } from '../lib/matchup';
 import { starterSlots } from '../lib/optimal';
@@ -249,7 +251,7 @@ async function loadSeasonPpg(
 }
 
 /**
- * Scores Sleeper's full-season forecast with the league's custom rules.
+ * Scores a source's full-season forecast with the league's custom rules.
  *
  * Sleeper currently reports `gp: 18` for a full NFL schedule including the bye
  * week, so the per-game rate is capped at the 17 games a player can play.
@@ -258,6 +260,8 @@ function summarizeSeasonProjections(
   statsByPlayer: Record<string, StatLine>,
   scoringModel: ScoringModel,
   playersById: Map<string, Player>,
+  sourceName: ProjectionSource['name'],
+  updatedAt?: string,
 ): SeasonProjectionMap {
   const NFL_GAMES = 17;
   const score = createScorer(scoringModel);
@@ -268,7 +272,14 @@ function summarizeSeasonProjections(
     const group = groupForPlayer(player);
     if (!group) continue;
 
-    const total = score(stats);
+    // Sleeper's TE-premium key mirrors receptions. FFToday publishes receiving
+    // stats without a source-specific bonus field, so derive it from the
+    // player's Sleeper eligibility before applying league scoring.
+    const scoringStats =
+      group === 'TE' && stats.bonus_rec_te === undefined
+        ? { ...stats, bonus_rec_te: stats.rec ?? 0 }
+        : stats;
+    const total = score(scoringStats);
     if (total <= 0) continue;
 
     const rawGames = Number(stats.gp ?? NFL_GAMES);
@@ -282,10 +293,57 @@ function summarizeSeasonProjections(
       ppg: total / games,
       games,
       usagePerGame: usage === null ? null : usage / games,
+      sources: [
+        {
+          name: sourceName,
+          total,
+          ppg: total / games,
+          ...(updatedAt ? { updatedAt } : {}),
+        },
+      ],
     });
   }
 
   return projections;
+}
+
+/**
+ * Averages independent forecasts instead of summing two descriptions of the
+ * same future season. A single available source remains fully usable.
+ */
+export function blendSeasonProjections(
+  sleeper: SeasonProjectionMap,
+  fftoday: SeasonProjectionMap,
+): SeasonProjectionMap {
+  const blended: SeasonProjectionMap = new Map();
+  const pids = new Set([...sleeper.keys(), ...fftoday.keys()]);
+
+  for (const pid of pids) {
+    const sleeperProjection = sleeper.get(pid);
+    const fftodayProjection = fftoday.get(pid);
+    if (!sleeperProjection || !fftodayProjection) {
+      const available = sleeperProjection ?? fftodayProjection;
+      if (available) blended.set(pid, available);
+      continue;
+    }
+
+    const usageValues = [
+      sleeperProjection.usagePerGame,
+      fftodayProjection.usagePerGame,
+    ].filter((value): value is number => value !== null);
+    blended.set(pid, {
+      total: (sleeperProjection.total + fftodayProjection.total) / 2,
+      ppg: (sleeperProjection.ppg + fftodayProjection.ppg) / 2,
+      games: Math.max(sleeperProjection.games, fftodayProjection.games),
+      usagePerGame:
+        usageValues.length > 0
+          ? usageValues.reduce((sum, value) => sum + value, 0) / usageValues.length
+          : null,
+      sources: [...sleeperProjection.sources, ...fftodayProjection.sources],
+    });
+  }
+
+  return blended;
 }
 
 /**
@@ -475,25 +533,47 @@ export async function loadLeague(
     league.total_rosters,
     league.scoring_settings?.rec,
   );
-  const [priorSeasons, market, seasonProjections] = await Promise.all([
-    Promise.all(
-      priorYears.map((year) =>
-        loadSeasonPpg(year, scoringModel, playersById, signal).catch(
-          () => new Map() as SeasonPpg,
+  const [priorSeasons, market, sleeperProjectionPayload, fftodaySnapshot] =
+    await Promise.all([
+      Promise.all(
+        priorYears.map((year) =>
+          loadSeasonPpg(year, scoringModel, playersById, signal).catch(
+            () => new Map() as SeasonPpg,
+          ),
         ),
       ),
-    ),
-    getMarketValues(marketQuery, signal).catch(() => new Map()),
-    nflState.season === season
-      ? cached(`proj-season:${season}`, TTL.SEASON_PROJECTIONS, () =>
-          getSeasonProjections(season, signal),
-        )
-          .then((payload) =>
-            summarizeSeasonProjections(payload.stats, scoringModel, playersById),
-          )
-          .catch(() => new Map() as SeasonProjectionMap)
-      : Promise.resolve(new Map() as SeasonProjectionMap),
-  ]);
+      getMarketValues(marketQuery, signal).catch(() => new Map()),
+      nflState.season === season
+        ? cached(`proj-season:${season}`, TTL.SEASON_PROJECTIONS, () =>
+            getSeasonProjections(season, signal),
+          ).catch(() => null)
+        : Promise.resolve(null),
+      nflState.season === season
+        ? getFftodaySnapshot(season, signal).catch(() => null)
+        : Promise.resolve(null),
+    ]);
+
+  const sleeperProjections: SeasonProjectionMap = sleeperProjectionPayload
+    ? summarizeSeasonProjections(
+        sleeperProjectionPayload.stats,
+        scoringModel,
+        playersById,
+        'Sleeper',
+      )
+    : new Map();
+  const fftodayProjections: SeasonProjectionMap = fftodaySnapshot
+    ? summarizeSeasonProjections(
+        matchFftodayProjections(fftodaySnapshot, playersById),
+        scoringModel,
+        playersById,
+        'FFToday',
+        fftodaySnapshot.updatedAt,
+      )
+    : new Map();
+  const seasonProjections = blendSeasonProjections(
+    sleeperProjections,
+    fftodayProjections,
+  );
 
   const dynastyIndex = buildDynastyIndex({
     valueIndex,

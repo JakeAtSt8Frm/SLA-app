@@ -271,11 +271,28 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                 )}
                 {dynasty.breakdown.projectedSeasonPoints !== null && (
                   <Metric
-                    label="Season projection"
+                    label="Blended projection"
                     value={fmt1(dynasty.breakdown.projectedSeasonPoints)}
-                    sub="Sleeper stats · custom scoring"
+                    sub={
+                      dynasty.breakdown.projectionSources.length > 1
+                        ? 'Sleeper + FFToday average · custom scoring'
+                        : `${dynasty.breakdown.projectionSources[0]?.name ?? 'Season'} stats · custom scoring`
+                    }
                   />
                 )}
+                {dynasty.breakdown.projectionSources.length > 1 &&
+                  dynasty.breakdown.projectionSources.map((source) => (
+                    <Metric
+                      key={source.name}
+                      label={`${source.name} projection`}
+                      value={fmt1(source.total)}
+                      sub={
+                        source.updatedAt
+                          ? `updated ${source.updatedAt} · custom scoring`
+                          : 'custom scoring'
+                      }
+                    />
+                  ))}
                 {dynasty.breakdown.projectedPpg !== null && (
                   <Metric
                     label="Projected PPG"

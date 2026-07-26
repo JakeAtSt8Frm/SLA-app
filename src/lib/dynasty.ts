@@ -104,6 +104,7 @@ export interface DynastyBreakdown {
   priorPpg: number | null;
   projectedSeasonPoints: number | null;
   projectedPpg: number | null;
+  projectionSources: ProjectionSource[];
   projectionWeight: number;
   blendedPpg: number | null;
   replacementPpg: number;
@@ -144,6 +145,14 @@ export interface ProjectedSeason {
   ppg: number;
   games: number;
   usagePerGame: number | null;
+  sources: ProjectionSource[];
+}
+
+export interface ProjectionSource {
+  name: 'Sleeper' | 'FFToday';
+  total: number;
+  ppg: number;
+  updatedAt?: string;
 }
 
 export type SeasonProjectionMap = Map<string, ProjectedSeason>;
@@ -153,7 +162,7 @@ export interface BuildDynastyIndexInput {
   playersById: Map<string, Player>;
   /** Prior-season PPG maps, most-recent first. Up to two. */
   priorSeasons: SeasonPpg[];
-  /** Current-season Sleeper totals, scored with this league's settings. */
+  /** Current-season forecast ensemble, scored with this league's settings. */
   seasonProjections?: SeasonProjectionMap;
   market: Map<string, MarketEntry>;
   rosterPositions: string[];
@@ -288,6 +297,7 @@ interface Row {
   priorPpg: number | null;
   projectedSeasonPoints: number | null;
   projectedPpg: number | null;
+  projectionSources: ProjectionSource[];
   projectionWeight: number;
   blendedPpg: number | null;
   vorp: number | null;
@@ -432,6 +442,7 @@ export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
       priorPpg,
       projectedSeasonPoints: projection?.total ?? null,
       projectedPpg: projection?.ppg ?? null,
+      projectionSources: projection?.sources ?? [],
       projectionWeight: projectedBlend.projectionWeight,
       blendedPpg: projectedBlend.ppg,
       vorp: null,
@@ -593,6 +604,11 @@ export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
         projectedSeasonPoints:
           r.projectedSeasonPoints === null ? null : round(r.projectedSeasonPoints, 1),
         projectedPpg: r.projectedPpg === null ? null : round(r.projectedPpg, 1),
+        projectionSources: r.projectionSources.map((source) => ({
+          ...source,
+          total: round(source.total, 1),
+          ppg: round(source.ppg, 1),
+        })),
         projectionWeight: round(r.projectionWeight, 3),
         blendedPpg: r.blendedPpg === null ? null : round(r.blendedPpg, 1),
         replacementPpg: round(replacementByGroup.get(r.group) ?? 0, 1),
