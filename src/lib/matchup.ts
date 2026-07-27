@@ -112,6 +112,95 @@ export const PLAYER_MATCHUP_WEIGHTS = {
   opportunity: 0.4,
 } as const;
 
+/**
+ * Ridge strength for the two-way fit, in units of games.
+ *
+ * Doubles as small-sample shrinkage: a defence seen three times is pulled most
+ * of the way back to average, one seen twelve times is largely trusted.
+ */
+const TWO_WAY_RIDGE = 3;
+
+/**
+ * How much a matchup actually moves a player's result, by position.
+ *
+ * The holdout rank correlation between this chip and the player's miss against
+ * his projection, normalised so the strongest position reads 1. Measured over
+ * 2021–2025 by `npm run research:matchup`, against the shipped `get()` output
+ * rather than a research stand-in, and averaged across two independent
+ * measurements to damp single-season noise:
+ *
+ *     QB 0.093   K 0.058   DL 0.044   WR 0.023   TE 0.022   RB 0.015
+ *     DB 0.001   LB −0.018
+ *
+ * The spread is the finding. Facing a soft defence is worth real points to a
+ * quarterback and nothing measurable to a linebacker, whose production is driven
+ * by how often the ball comes near him rather than by who is throwing it — and
+ * tackles accrue whether his opponent is good or bad.
+ *
+ * This deliberately does **not** rescale the score. Shrinking low-influence
+ * chips toward 50 was tried and could not be justified: it helped on the holdout
+ * season and hurt on the validation one, with both effects near zero. It is used
+ * for presentation only — a chip this weak should not be dressed up as advice.
+ */
+export const MATCHUP_INFLUENCE: Record<PositionGroup, number> = {
+  QB: 1,
+  K: 0.63,
+  DL: 0.45,
+  WR: 0.25,
+  TE: 0.24,
+  RB: 0.16,
+  DB: 0.02,
+  LB: 0,
+};
+
+/** Below this, the rating carries no information worth acting on. */
+export const MATCHUP_INFLUENCE_FLOOR = 0.15;
+
+/**
+ * Two-way additive fit: points conceded = league mean + offence + defence.
+ *
+ * The obvious way to schedule-adjust a defence is to subtract the producing
+ * team's own average from each week's concession, which is what this model used
+ * to do. It has a hole: the offences themselves played different schedules, so
+ * an offence inflated by a soft run of opponents drags its victims down with it,
+ * and a defence that happened to face good offences stays overrated.
+ *
+ * Alternating ridge least squares solves both sides at once — each pass
+ * re-estimates offences given the current defence estimates and vice versa,
+ * converging on effects that are mutually consistent. Worth about a 29% lift in
+ * holdout rank correlation over the single-pass version it replaces.
+ */
+function twoWayDefenseEffects(
+  games: Array<{ defense: string; offense: string; points: number }>,
+  leagueMean: number,
+): Map<string, number> {
+  const offense = new Map<string, number>();
+  const defense = new Map<string, number>();
+  if (!games.length) return defense;
+
+  for (let iteration = 0; iteration < 25; iteration++) {
+    const offSums = new Map<string, { sum: number; n: number }>();
+    for (const game of games) {
+      const entry = offSums.get(game.offense) ?? { sum: 0, n: 0 };
+      entry.sum += game.points - leagueMean - (defense.get(game.defense) ?? 0);
+      entry.n++;
+      offSums.set(game.offense, entry);
+    }
+    for (const [team, { sum, n }] of offSums) offense.set(team, sum / (n + TWO_WAY_RIDGE));
+
+    const defSums = new Map<string, { sum: number; n: number }>();
+    for (const game of games) {
+      const entry = defSums.get(game.defense) ?? { sum: 0, n: 0 };
+      entry.sum += game.points - leagueMean - (offense.get(game.offense) ?? 0);
+      entry.n++;
+      defSums.set(game.defense, entry);
+    }
+    for (const [team, { sum, n }] of defSums) defense.set(team, sum / (n + TWO_WAY_RIDGE));
+  }
+
+  return defense;
+}
+
 export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
   const { scoringModel, playersById, weekStats, weekOpponents, weekTeams, throughWeek } = input;
   const score = createScorer(scoringModel);
@@ -128,8 +217,6 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
   const weeklyOpportunities = new Map<PositionGroup, Map<string, Map<number, number>>>();
   // group -> opponent -> week -> team producing the points
   const weeklySourceTeams = new Map<PositionGroup, Map<string, Map<number, string>>>();
-  // group -> source team -> per-week points produced
-  const teamWeeklyTotals = new Map<PositionGroup, Map<string, Map<number, number>>>();
 
   for (const group of POSITION_GROUPS) {
     conceded.set(group, new Map());
@@ -138,7 +225,6 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
     weeklyTotals.set(group, new Map());
     weeklyOpportunities.set(group, new Map());
     weeklySourceTeams.set(group, new Map());
-    teamWeeklyTotals.set(group, new Map());
   }
 
   const nested = <T>(m: Map<PositionGroup, Map<string, T>>, g: PositionGroup, d: string, init: () => T): T => {
@@ -221,14 +307,6 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
           () => new Map<number, string>(),
         );
         sources.set(week, row.sourceTeam);
-
-        const teamTotals = nested(
-          teamWeeklyTotals,
-          row.group,
-          row.sourceTeam,
-          () => new Map<number, number>(),
-        );
-        teamTotals.set(week, (teamTotals.get(week) ?? 0) + row.points);
       }
     }
   }
@@ -245,17 +323,22 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
       continue;
     }
 
-    const teamStrengthRows = [...teamWeeklyTotals.get(group)!.entries()].map(
-      ([team, totals]) => ({
-        id: team,
-        value: mean([...totals.values()]),
-      }),
-    );
     const allWeeklyTotals = [...perDefense.values()].flatMap((weekMap) => [
       ...weekMap.values(),
     ]);
     const leagueWeeklyMean = mean(allWeeklyTotals);
-    const teamStrength = new Map(teamStrengthRows.map((row) => [row.id, row.value]));
+
+    // One row per defence-week, carrying the offence that produced the points.
+    const groupSources = weeklySourceTeams.get(group)!;
+    const games: Array<{ defense: string; offense: string; points: number }> = [];
+    for (const [defense, weekMap] of perDefense) {
+      const sources = groupSources.get(defense);
+      for (const [week, points] of weekMap) {
+        const offense = sources?.get(week);
+        if (offense) games.push({ defense, offense, points });
+      }
+    }
+    const defenseEffects = twoWayDefenseEffects(games, leagueWeeklyMean);
 
     // League-wide distribution of individual performances against this group,
     // used to define what counts as a ceiling or floor week.
@@ -294,13 +377,8 @@ export function buildMatchupIndex(input: BuildMatchupIndexInput): MatchupIndex {
       const volatility = stdev(totals);
       const volumeMap = weeklyOpportunities.get(group)!.get(defense) ?? new Map();
       const opportunitiesPerGame = mean(weeks.map((week) => volumeMap.get(week) ?? 0));
-      const sourceMap = weeklySourceTeams.get(group)!.get(defense) ?? new Map();
-      const adjustedTotals = weeks.map((week) => {
-        const source = sourceMap.get(week);
-        const sourceStrength = source ? teamStrength.get(source) : undefined;
-        return weekMap.get(week)! - ((sourceStrength ?? leagueWeeklyMean) - leagueWeeklyMean);
-      });
-      const opponentAdjustedPpg = mean(adjustedTotals);
+      // The defence's own effect, purged of the offences it happened to face.
+      const opponentAdjustedPpg = leagueWeeklyMean + (defenseEffects.get(defense) ?? 0);
 
       // Ceiling/floor rates measured over individual performances allowed.
       const performances = conceded.get(group)!.get(defense) ?? [];

@@ -9,9 +9,10 @@
 
 import { useTheme } from './ThemeProvider';
 import { matchupScoreFill, rankFill, valueScoreFill } from '../lib/colors';
+import { MATCHUP_INFLUENCE, MATCHUP_INFLUENCE_FLOOR } from '../lib/matchup';
 import { fmtSlot } from '../lib/labels';
 import { statusTone } from '../lib/status';
-import type { PlayerStatus, RankInfo, StatusLabel } from '../lib/types';
+import type { PlayerStatus, PositionGroup, RankInfo, StatusLabel } from '../lib/types';
 
 /** Icon per status — the secondary channel that makes colour non-essential. */
 const STATUS_ICON: Record<StatusLabel, string> = {
@@ -63,19 +64,39 @@ export function ValueChip({ score }: { score: number | null }) {
   );
 }
 
-/** Matchup Score chip (0–100). Higher means a more favorable matchup. */
-export function MatchupChip({ score }: { score: number | null }) {
+/**
+ * Matchup Score chip (0–100). Higher means a more favorable matchup.
+ *
+ * The number is shown as measured, never rescaled. But how much a matchup moves
+ * a result varies enormously by position — it is worth real points to a
+ * quarterback and nothing measurable to a linebacker — and a column of
+ * identical-looking chips down a 21-man lineup invites reading them as equally
+ * meaningful. Where the rating has no demonstrated predictive power, the chip is
+ * dimmed and says so, rather than presenting noise with the same confidence as
+ * signal.
+ */
+export function MatchupChip({
+  score,
+  group,
+}: {
+  score: number | null;
+  group?: PositionGroup | null;
+}) {
   const { mode } = useTheme();
   const { background, ink } = matchupScoreFill(score, mode);
+  const influence = group ? MATCHUP_INFLUENCE[group] : 1;
+  const weak = influence < MATCHUP_INFLUENCE_FLOOR;
 
   return (
     <span
-      className="chip mono"
+      className={`chip mono${weak ? ' chip--weak' : ''}`}
       style={{ background, color: ink }}
       title={
         score === null
           ? 'No matchup data'
-          : `Matchup rating ${Math.round(score)} of 100`
+          : weak
+            ? `Matchup rating ${Math.round(score)} of 100 — but the opponent barely moves ${group} scoring, so this is close to noise`
+            : `Matchup rating ${Math.round(score)} of 100`
       }
     >
       {score === null ? '—' : Math.round(score)}
@@ -186,6 +207,76 @@ export function PosBadge({ group, slot }: { group: string | null; slot?: string 
   return (
     <span className="chip chip-outline" style={{ minWidth: 34, justifyContent: 'center' }}>
       {text}
+    </span>
+  );
+}
+
+/**
+ * Head-to-head win probability as a two-sided bar.
+ *
+ * Both percentages are printed and each side carries its team's own colour, so
+ * the bar is reinforcement rather than the only channel — the same rule the
+ * rest of this file follows.
+ */
+export function WinProbBar({
+  homeProb,
+  awayProb,
+  homeColor,
+  awayColor,
+  label,
+}: {
+  homeProb: number;
+  awayProb: number;
+  homeColor: string;
+  awayColor: string;
+  label: string;
+}) {
+  const home = Math.round(homeProb * 100);
+  const away = Math.round(awayProb * 100);
+
+  return (
+    <div
+      className="winprob"
+      role="meter"
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={home}
+      aria-valuetext={`${home}% to ${away}%`}
+    >
+      <span className="winprob__fill" style={{ width: `${homeProb * 100}%`, background: homeColor }} />
+      <span
+        className="winprob__fill winprob__fill--away"
+        style={{ width: `${awayProb * 100}%`, background: awayColor }}
+      />
+    </div>
+  );
+}
+
+/**
+ * A projected range: the central estimate with its 10th–90th percentile band.
+ *
+ * The interval is the point of the forecast model, so it is shown wherever the
+ * central number is — quoting a single number would throw away the part that
+ * was actually measured.
+ */
+export function RangeReadout({
+  median,
+  low,
+  high,
+  size = 15,
+}: {
+  median: number;
+  low: number;
+  high: number;
+  size?: number;
+}) {
+  return (
+    <span className="mono" title={`Projected ${median.toFixed(1)}, 80% of outcomes between ${low.toFixed(1)} and ${high.toFixed(1)}`}>
+      <span style={{ fontSize: size, fontWeight: 700 }}>{median.toFixed(1)}</span>{' '}
+      <span className="tiny muted">
+        {low.toFixed(0)}–{high.toFixed(0)}
+      </span>
     </span>
   );
 }

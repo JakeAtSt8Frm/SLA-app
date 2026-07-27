@@ -97,7 +97,7 @@ export function PlayerRow({ player: p, onSelect, showProjection = true, note }: 
       {/* Matchup sits with the numbers on the right, not with the identity
           pills — it describes this week's opponent, not the player. */}
       <span className="player-row__matchup">
-        <MatchupChip score={p.matchupScore} />
+        <MatchupChip score={p.matchupScore} group={p.group} />
       </span>
 
       {showProjection && (
@@ -163,7 +163,7 @@ export function PlayerCard({ player: p, onSelect }: Props) {
         <ValueChip score={p.valueScore} />
         <RankPill rank={p.totalRank} kind="Total" />
         <RankPill rank={p.ppgRank} kind="PPG" />
-        <MatchupChip score={p.matchupScore} />
+        <MatchupChip score={p.matchupScore} group={p.group} />
         <StatusBadge status={p.status} />
       </div>
     </button>

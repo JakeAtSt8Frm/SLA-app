@@ -92,7 +92,34 @@ const REBUILDER_WEIGHTS: Record<keyof typeof DYNASTY_WEIGHTS, number> = {
   risk: 0.04,
 };
 
-export type MarketVerdict = 'Buy' | 'Sell' | 'Fair' | 'No market';
+export type MarketVerdict =
+  | 'Buy'
+  | 'Sell'
+  | 'Fair'
+  | 'Thin market'
+  | 'No read'
+  | 'No market';
+
+/**
+ * How far the intrinsic rank must sit from the market rank to call it.
+ *
+ * Both sides are percentiles over the same pool, so this reads directly: a 0.15
+ * gap is "the market has him fifteen percentiles lower than this model does".
+ * The figure carries over the tolerance the previous comparison implied — its
+ * ±0.12 was measured on a blended scale that was 16% market, so it was really
+ * asking for 0.12 / (1 − 0.16) ≈ 0.14 of disagreement.
+ */
+const VERDICT_GAP = 0.15;
+
+/**
+ * Below this market percentile a price is not worth comparing against.
+ *
+ * FantasyCalc's bottom fifth is rounding noise — values of 4, 15, 34 against a
+ * 10,275 top — so a percentile gap there is dominated by the arbitrariness of
+ * where a worthless player happens to land, not by disagreement. Those come back
+ * "Thin market" instead of manufacturing a buy signal on a player nobody trades.
+ */
+const VERDICT_MIN_LIQUIDITY = 0.2;
 export type Trend = 'Rising' | 'Falling' | 'Stable' | 'Unknown';
 export type RiskBand = 'Low' | 'Moderate' | 'High';
 export type Liquidity = 'High' | 'Moderate' | 'Low';
@@ -512,7 +539,24 @@ export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
     effByGroup.set(group, inGroup(groupRows, (r) => r.effRaw));
   }
 
-  const byPlayer = new Map<string, DynastyValue>();
+  /**
+   * Legs are computed once per player and read twice: by the score, and by the
+   * verdict, which needs them percentiled across players before it can compare
+   * anything.
+   */
+  interface Legs {
+    legs: Record<keyof typeof DYNASTY_WEIGHTS, number>;
+    marketNorm: number;
+    /**
+     * The same opinion with every trace of the market removed — the market leg
+     * itself and the market term inside insulation — renormalised back onto 0..1.
+     * This is the half of the buy/sell comparison that has to be independent of
+     * the price it is being compared against.
+     */
+    intrinsic: number;
+  }
+
+  const legsByPid = new Map<string, Legs>();
 
   for (const r of rows) {
     const market = r.market;
@@ -555,6 +599,73 @@ export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
       efficiency: effNorm,
       risk: riskNorm,
     };
+
+    // Insulation minus its market term, with the remaining three shares scaled
+    // back up to sum to one so the leg keeps its 0..1 meaning.
+    const insulationNoMarket = clamp01(
+      (0.35 * ageNorm + 0.2 * roleNorm + 0.15 * youthExp) / 0.7,
+    );
+    // Production borrows the market outright for a player with no snaps, so for
+    // those it has to fall back to the same low prior an unpriced player gets —
+    // otherwise the "intrinsic" side of the comparison is the market again.
+    const prodNoMarket = r.vorp !== null ? prodNorm : 0.3;
+    let intrinsicSum = 0;
+    let intrinsicWeight = 0;
+    for (const key of Object.keys(DYNASTY_WEIGHTS) as Array<keyof typeof DYNASTY_WEIGHTS>) {
+      if (key === 'market') continue;
+      const value =
+        key === 'insulation'
+          ? insulationNoMarket
+          : key === 'production'
+            ? prodNoMarket
+            : legs[key];
+      intrinsicSum += DYNASTY_WEIGHTS[key] * value;
+      intrinsicWeight += DYNASTY_WEIGHTS[key];
+    }
+
+    legsByPid.set(r.pid, {
+      legs,
+      marketNorm,
+      intrinsic: intrinsicWeight > 0 ? intrinsicSum / intrinsicWeight : 0.5,
+    });
+  }
+
+  /*
+   * Both halves of the buy/sell comparison are ranked over the *same* pool: the
+   * players this group has a market price for.
+   *
+   * Ranking them over different pools is what made the old verdict a restatement
+   * of "is he cheap". FantasyCalc prices 68 of this league's 160 tight ends, so
+   * the market leg was a percentile among 68 while every other leg was a
+   * percentile among 160 — and the 92 unpriced tight ends sit below all of them.
+   * That put a priced player's market percentile roughly 0.2–0.3 under his
+   * intrinsic one by construction, which is wider than the threshold, so simply
+   * having a price read as being underpriced. Measured on 2025 it returned Buy on
+   * 100% of the cheapest two deciles and Sell on 6 players out of 399.
+   */
+  const intrinsicRankByGroup = new Map<PositionGroup, Map<string, number>>();
+  const marketRankByGroup = new Map<PositionGroup, Map<string, number>>();
+  for (const [group, groupRows] of byGroup) {
+    const pricedRows = groupRows.filter((r) => r.market !== null);
+    intrinsicRankByGroup.set(
+      group,
+      percentileRanks(
+        pricedRows.map((r) => ({ id: r.pid, value: legsByPid.get(r.pid)?.intrinsic ?? 0.5 })),
+      ),
+    );
+    marketRankByGroup.set(
+      group,
+      percentileRanks(
+        pricedRows.map((r) => ({ id: r.pid, value: r.market?.value ?? 0 })),
+      ),
+    );
+  }
+
+  const byPlayer = new Map<string, DynastyValue>();
+
+  for (const r of rows) {
+    const market = r.market;
+    const { legs, marketNorm } = legsByPid.get(r.pid)!;
 
     const rawFor = (weights: Record<keyof typeof DYNASTY_WEIGHTS, number>) => {
       let sum = 0;
@@ -619,10 +730,15 @@ export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
         marketValue: market ? market.value : null,
         marketOverallRank: market ? market.overallRank : null,
         marketPositionRank: market ? market.positionRank : null,
-        verdict: verdictFor(market, raw, marketNorm),
+        verdict: verdictFor(
+          market,
+          intrinsicRankByGroup.get(r.group)?.get(r.pid) ?? null,
+          marketRankByGroup.get(r.group)?.get(r.pid) ?? null,
+          r.vorp !== null,
+        ),
         marketTrend: trendFor(market),
         liquidity: liquidityFor(market, marketNorm),
-        injuryRisk: riskBandFor(riskNorm),
+        injuryRisk: riskBandFor(legs.risk),
         tier: tierFor(score),
         contributions,
       },
@@ -661,18 +777,36 @@ function groupOf(player: Player | undefined): PositionGroup | null {
   return null;
 }
 
-function verdictFor(
+/**
+ * Buy / Sell / Fair, from two ranks over the same population.
+ *
+ * `intrinsicRank` is where this model puts the player among the priced players
+ * at his position; `marketRank` is where the market puts him among the same. The
+ * gap between two percentiles built the same way over the same pool is a real
+ * disagreement — which is the whole claim the verdict makes.
+ */
+export function verdictFor(
   market: MarketEntry | null,
-  raw: number,
-  marketNorm: number,
+  intrinsicRank: number | null,
+  marketRank: number | null,
+  hasProduction: boolean,
 ): MarketVerdict {
-  if (!market) return 'No market';
-  // Compare the intrinsic opinion (this score) against where the market prices
-  // the player within his position. A wide, consistent gap is a buy or sell
-  // signal.
-  const gap = raw - marketNorm;
-  if (gap > 0.12) return 'Buy';
-  if (gap < -0.12) return 'Sell';
+  if (!market || intrinsicRank === null || marketRank === null) return 'No market';
+  if (marketRank < VERDICT_MIN_LIQUIDITY) return 'Thin market';
+  /*
+   * Without production the intrinsic side is a fixed low prior, not an opinion,
+   * so any gap it opens against the market is manufactured — and only ever in
+   * one direction. Before this abstention, 43 of 74 sells were players the model
+   * had nothing on: incoming rookies the market prices on draft capital and
+   * prospect status, which this model has no source for. None of the buys had
+   * the same problem, because a low prior cannot rank a player high. Calling
+   * those a sell dresses an absence of evidence up as disagreement.
+   */
+  if (!hasProduction) return 'No read';
+
+  const gap = intrinsicRank - marketRank;
+  if (gap > VERDICT_GAP) return 'Buy';
+  if (gap < -VERDICT_GAP) return 'Sell';
   return 'Fair';
 }
 

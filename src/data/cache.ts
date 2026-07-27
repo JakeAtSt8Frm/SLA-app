@@ -137,6 +137,25 @@ export const TTL = {
 } as const;
 
 /**
+ * Requests already running, keyed the same way as the store.
+ *
+ * A cache read is asynchronous, so two callers asking for the same key within a
+ * few milliseconds both miss and both fetch — the write from the first has not
+ * landed when the second reads. A single load mostly avoids that by construction
+ * (its keys are distinct), but re-entry does not: StrictMode runs every effect
+ * twice in development, and tapping refresh or flicking between seasons starts a
+ * second load over the same keys as the first. Holding the promise makes the
+ * second caller wait on the request already running rather than issue its own —
+ * which on the 2.5MB player dictionary is the difference that shows.
+ */
+const inFlight = new Map<string, Promise<unknown>>();
+
+/** True for a cancelled request, in either shape a runtime produces. */
+function isAbort(err: unknown): boolean {
+  return err instanceof Error && err.name === 'AbortError';
+}
+
+/**
  * Fetches through the cache: returns the cached value when fresh, otherwise
  * fetches, stores and returns.
  */
@@ -145,11 +164,38 @@ export async function cached<T>(
   ttl: number,
   fetcher: () => Promise<T>,
 ): Promise<T> {
-  const hit = await cacheGet<T>(key);
-  if (hit !== null) return hit;
+  const existing = inFlight.get(key) as Promise<T> | undefined;
+  if (existing) {
+    try {
+      return await existing;
+    } catch (err) {
+      /*
+       * The request being shared carries its caller's AbortSignal, and that
+       * caller may have walked away — switching season aborts the load in
+       * flight. Their cancellation says nothing about this request, so it must
+       * not be inherited: fall through and issue our own. Any other failure is a
+       * real answer about the payload and is passed on.
+       */
+      if (!isAbort(err)) throw err;
+    }
+  }
 
-  const value = await fetcher();
-  // Fire-and-forget: a slow write shouldn't delay rendering.
-  void cacheSet(key, value, ttl);
-  return value;
+  const request = (async () => {
+    const hit = await cacheGet<T>(key);
+    if (hit !== null) return hit;
+
+    const value = await fetcher();
+    // Fire-and-forget: a slow write shouldn't delay rendering.
+    void cacheSet(key, value, ttl);
+    return value;
+  })();
+
+  inFlight.set(key, request);
+  // Cleared either way — a failed request must not be handed to the next caller,
+  // who may well be a retry of the one that just failed.
+  void request.finally(() => {
+    if (inFlight.get(key) === request) inFlight.delete(key);
+  });
+
+  return request;
 }

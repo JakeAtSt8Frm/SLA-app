@@ -1,11 +1,36 @@
+import { lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
-import { TeamsPage } from './pages/Teams';
-import { OptimalPage } from './pages/Optimal';
-import { HistoryPage } from './pages/History';
-import { PlayersPage } from './pages/Players';
-import { SchedulePage } from './pages/Schedule';
-import { AnalyticsPage } from './pages/Analytics';
+
+/*
+ * Pages are loaded on demand.
+ *
+ * The landing route is Teams, but a static import graph makes every page's cost
+ * part of the first paint — and the pages are not the same size. Analytics alone
+ * pulls in the Monte Carlo simulator and the playoff bracket resolver, neither of
+ * which a reader checking a lineup ever runs. Splitting at the route lets each
+ * page's code arrive when it is first visited, which on a phone on stadium wifi
+ * is the difference that matters.
+ *
+ * Recharts is already split beneath this (see LazyChart), so a page that draws
+ * charts fetches two small chunks rather than one large one.
+ */
+const TeamsPage = lazy(() => import('./pages/Teams').then((m) => ({ default: m.TeamsPage })));
+const OptimalPage = lazy(() =>
+  import('./pages/Optimal').then((m) => ({ default: m.OptimalPage })),
+);
+const HistoryPage = lazy(() =>
+  import('./pages/History').then((m) => ({ default: m.HistoryPage })),
+);
+const PlayersPage = lazy(() =>
+  import('./pages/Players').then((m) => ({ default: m.PlayersPage })),
+);
+const SchedulePage = lazy(() =>
+  import('./pages/Schedule').then((m) => ({ default: m.SchedulePage })),
+);
+const AnalyticsPage = lazy(() =>
+  import('./pages/Analytics').then((m) => ({ default: m.AnalyticsPage })),
+);
 
 export default function App() {
   return (

@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { LazyWeeklyScoreChart } from './LazyChart';
 import { useLeagueData } from '../data/LeagueProvider';
+import { weekForecasts } from '../data/predictions';
 import { playerHeadshot, teamLogo } from '../lib/sleeper';
 import { fmt1, fmtPct, fmtSigned, StatusBadge, ValueChip } from './primitives';
 import { enrichPlayer } from '../data/selectors';
@@ -28,12 +29,68 @@ export function PlayerModal({ pid, week, onClose }: Props) {
   const data = useLeagueData();
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  // Escape closes; focus moves into the sheet so keyboard users land inside it.
+  /*
+   * Modal keyboard contract.
+   *
+   * `aria-modal` tells assistive technology the rest of the page is inert, but it
+   * does nothing to the tab order — so without a trap, Tab walks straight out of
+   * the sheet and into the roster behind it, where the reader is still told they
+   * are in a dialog. Cycling focus inside the sheet is what makes the attribute
+   * true.
+   *
+   * Focus is also put back where it came from on close. Every sheet is opened
+   * from a player row, and dropping focus on `<body>` means a keyboard reader
+   * restarts at the top of the page each time they look a player up — which in a
+   * 21-row lineup is the whole interaction.
+   */
   useEffect(() => {
     if (!pid) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+
+    const opener = document.activeElement as HTMLElement | null;
+
+    const focusable = (): HTMLElement[] => {
+      const root = dialogRef.current;
+      if (!root) return [];
+      return [
+        ...root.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ].filter((el) => el.offsetParent !== null || el === document.activeElement);
     };
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+
+      const items = focusable();
+      if (items.length === 0) {
+        // Nothing to land on but the sheet itself — hold focus there rather than
+        // letting it escape to the page behind.
+        e.preventDefault();
+        dialogRef.current?.focus();
+        return;
+      }
+
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+
+      if (e.shiftKey && (active === first || active === dialogRef.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      } else if (active instanceof Node && !dialogRef.current?.contains(active)) {
+        // Focus was already outside — pull it back in on the next Tab.
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
     document.addEventListener('keydown', onKey);
     dialogRef.current?.focus();
 
@@ -44,6 +101,10 @@ export function PlayerModal({ pid, week, onClose }: Props) {
     return () => {
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = previous;
+      // `isConnected` guards the case where the opener itself was unmounted —
+      // a filter change behind the sheet, say — where refocusing it would throw
+      // focus to the top of the document instead of leaving it where it is.
+      if (opener?.isConnected) opener.focus();
     };
   }, [pid, onClose]);
 
@@ -63,12 +124,29 @@ export function PlayerModal({ pid, week, onClose }: Props) {
       actual: w.actual,
     }));
 
-    return { player, value, dynasty, weekly, matchup, chart };
+    /*
+     * Built pregame so the band describes what was knowable before kickoff. In
+     * live mode a finished player collapses to his own result, which is true but
+     * not a forecast — and it would make the section vanish exactly when the
+     * reader wants to compare the projection against what happened.
+     */
+    const forecast = weekForecasts(data, week, 'pregame').get(pid) ?? null;
+    const actual = weekForecasts(data, week, 'live').get(pid)?.actual ?? null;
+
+    return {
+      player,
+      value,
+      dynasty,
+      weekly,
+      matchup,
+      chart,
+      forecast: forecast ? { ...forecast, actual } : null,
+    };
   }, [data, pid, week]);
 
   if (!pid || !detail) return null;
 
-  const { player: p, value, dynasty, weekly, matchup, chart } = detail;
+  const { player: p, value, dynasty, weekly, matchup, chart, forecast } = detail;
 
   const played = weekly.length;
   const beats = weekly.filter((w) => w.projected !== null && w.actual > w.projected).length;
@@ -137,6 +215,42 @@ export function PlayerModal({ pid, week, onClose }: Props) {
         </header>
 
         <div className="sheet__body">
+          {/* ---- This week's forecast distribution ---- */}
+          {forecast && (
+            <section>
+              <h3 className="section-title">
+                Week {week} forecast
+                {forecast.actual !== null && ' — how it looked beforehand'}
+              </h3>
+              <div className="metric-grid">
+                <Metric
+                  label="Expected"
+                  value={fmt1(forecast.median)}
+                  sub={`source says ${fmt1(forecast.projection)}`}
+                />
+                <Metric label="Floor" value={fmt1(forecast.p10)} sub="10th pct" />
+                <Metric label="Likely" value={`${fmt1(forecast.p25)}–${fmt1(forecast.p75)}`} sub="middle half" />
+                <Metric label="Ceiling" value={fmt1(forecast.p90)} sub="90th pct" />
+                {forecast.playProb < 1 && (
+                  <Metric
+                    label="Plays"
+                    value={fmtPct(forecast.playProb)}
+                    sub="when projected"
+                  />
+                )}
+                {forecast.actual !== null && (
+                  <Metric label="Actual" value={fmt1(forecast.actual)} />
+                )}
+              </div>
+              <p className="small muted" style={{ marginTop: 6 }}>
+                The source projection corrected for the bias it has carried at this
+                level, and widened by the error it has historically made there. Eight
+                of ten weeks like this land between {fmt1(forecast.p10)} and{' '}
+                {fmt1(forecast.p90)}.
+              </p>
+            </section>
+          )}
+
           {/* ---- Weekly projected vs actual ---- */}
           <section>
             <h3 className="section-title">
@@ -539,12 +653,21 @@ function VerdictChip({ verdict }: { verdict: string }) {
         ? 'Sell high'
         : verdict === 'Fair'
           ? 'Fairly valued'
-          : 'No market';
+          : verdict;
+  // The three abstentions mean different things and shouldn't read alike.
+  const why =
+    verdict === 'Thin market'
+      ? "Priced near the bottom of his position, where the market's numbers are too coarse to disagree with"
+      : verdict === 'No read'
+        ? 'Priced, but with no production for this model to weigh it against — the market is paying for draft capital or prospect status, which this model has no source for'
+        : verdict === 'No market'
+          ? 'FantasyCalc does not price this position'
+          : 'This model’s rank among priced players at his position, against the market’s rank over the same group';
   return (
     <span
       className="chip"
       style={{ color: tone, background: `color-mix(in srgb, ${tone} 14%, transparent)` }}
-      title="Intrinsic dynasty value vs current market price"
+      title={why}
     >
       {label}
     </span>

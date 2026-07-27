@@ -82,11 +82,37 @@ study was designed to catch.
 - Efficiency and recent trend did not earn stable global weight.
 - More formula complexity did not translate to better holdout performance.
 
+## Correction: the buy/sell comparison (not the model)
+
+The study above evaluates the *score*. The buy/sell verdict is a separate
+comparison layered on top of it, and it was wrong in a way this study could not
+have caught — the study runs with a neutral market input, so it never exercised
+the comparison at all.
+
+The verdict ranked the intrinsic opinion over every player in a position group
+but the market over only the players FantasyCalc prices. Those pools are far
+apart: 68 of 160 tight ends, 107 of 181 running backs, 156 of 284 receivers. The
+unpriced remainder sits below every priced player, so a priced player's market
+percentile ran 0.20–0.29 under his intrinsic one by construction — wider than the
+±0.12 threshold. On the 2025 league that produced Buy for 55.6% of priced players
+and Sell for 1.5%, with Buy at 100% in the two cheapest market deciles and 0% in
+the two most expensive. The verdict was reporting market cheapness.
+
+Both sides are now ranked over the priced population only. Distribution on the
+same data: Buy 11.5%, Fair 46.6%, Sell 7.8%, with Thin market (20.3%) and No read
+(13.8%) abstaining where a price or a production record is missing.
+
+**Dynasty scores are unchanged.** The fix touches only the comparison; scores
+were checked against a pinned set before and after. `npm run verify:dynasty`
+holds the properties, the load-bearing one being that matching ranks read Fair
+wherever the player sits in the market.
+
 ## Known limits
 
 - Sleeper does not provide historical trade-market prices, so the restored
   model is evaluated with a neutral market input. This is a production forecast,
-  not a historical test of FantasyCalc's prices.
+  not a historical test of FantasyCalc's prices — and, as above, it does not
+  exercise the buy/sell comparison either.
 - Players without four NFL games at the snapshot are excluded. Rookie and
   prospect valuation still needs market, draft-capital, or college data.
 - Historical injury designations are unavailable, so the proxy uses observed

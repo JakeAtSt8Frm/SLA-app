@@ -186,6 +186,34 @@ a {
   border: 0;
 }
 
+/*
+ * Skip link. Off-screen rather than `display: none`, because a hidden element
+ * can't take focus — it has to stay in the tab order and only become visible
+ * once it gets there. The z-index clears the sticky header it lands on top of.
+ */
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 200;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+  transform: translateY(-200%);
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+/* The main landmark is focusable so the skip link can move focus, not just
+   scroll. That focus ring would otherwise outline the entire page. */
+.page:focus {
+  outline: none;
+}
+
 /* Anything wide scrolls inside its own container, never the page body. */
 .scroll-x {
   overflow-x: auto;

@@ -201,12 +201,24 @@
 
 /* ----------------------------------------------------------- settings --- */
 
+/*
+ * The gear's positioning context on desktop, where the button sits at the right
+ * edge of the header and `right: 0` lands the panel inside the viewport. On a
+ * phone it becomes `static` — see the note on the mobile block below.
+ */
+.topbar__settings {
+  position: relative;
+}
+
 .settings {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
   z-index: 60;
   width: min(310px, calc(100vw - 24px));
+  max-height: calc(100dvh - 140px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 14px;
   display: flex;
   flex-direction: column;
@@ -255,6 +267,34 @@
 .settings__meta {
   padding-top: 8px;
   border-top: 1px solid var(--border);
+}
+
+/*
+ * On a phone `.topbar__inner` wraps, which drops the controls onto their own
+ * line starting at the *left* of the header — so the gear is nowhere near the
+ * right edge. Anchoring a 310px panel to that button with `right: 0` pushed its
+ * left half off-screen, since nothing clamped it to the viewport.
+ *
+ * Anchoring to the header instead of the button fixes it by construction: the
+ * topbar is always full-width, so a left/right inset is measured from the screen
+ * edges and the panel cannot overflow regardless of where the button lands or
+ * how the controls happen to wrap. It also sits below the whole header — clear
+ * of the season and week selects it would otherwise cover.
+ */
+@media (max-width: 760px) {
+  .topbar__settings {
+    position: static;
+  }
+
+  .settings {
+    left: 12px;
+    right: 12px;
+    top: calc(100% + 6px);
+    width: auto;
+    /* Clears the fixed bottom nav. Only binds on the shortest phones with the
+       roster override expanded, where the panel would otherwise run under it. */
+    max-height: calc(100dvh - 230px);
+  }
 }
 
 .progress {
@@ -954,4 +994,101 @@
   .rank-chart__legend {
     gap: 7px 10px;
   }
+}
+
+/* ------------------------------------------------ win probability & odds --- */
+
+/*
+ * A two-sided bar: the two fills abut in the middle, so the boundary itself is
+ * the reading. Both percentages are printed alongside, since the fills carry
+ * team colours that a reader may not be able to distinguish.
+ */
+.winprob {
+  display: flex;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+}
+
+.winprob__fill {
+  display: block;
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.winprob__fill--away {
+  opacity: 0.55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .winprob__fill {
+    transition: none;
+  }
+}
+
+.matchup-odds {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.matchup-odds__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.matchup-odds__side {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.matchup-odds__side--away {
+  text-align: right;
+  align-items: flex-end;
+}
+
+.matchup-odds__pct {
+  font-size: 19px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.matchup-odds__bar {
+  grid-column: 1 / -1;
+}
+
+.odds-cell {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A quiet in-cell bar behind the number, so a column of odds reads as a shape. */
+.odds-cell__track {
+  display: block;
+  height: 3px;
+  margin-top: 3px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+}
+
+.odds-cell__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+/*
+ * A chip whose underlying rating has no demonstrated predictive power for that
+ * position. Dimmed rather than hidden: the number is still real and still ranks
+ * defences correctly, it just should not carry the same visual weight as one
+ * that predicts something.
+ */
+.chip--weak {
+  opacity: 0.45;
 }

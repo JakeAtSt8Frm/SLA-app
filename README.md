@@ -73,10 +73,51 @@ comparable across positions.
   Sleeper can't provide — the current trade market from
   [FantasyCalc](https://fantasycalc.com) (superflex- and size-matched, keyed by
   Sleeper id). The gap between the intrinsic dynasty score and the market price
-  surfaces in the player sheet as a **Buy-low / Sell-high / Fair** verdict,
-  alongside contender- and rebuilder-lens scores. FantasyCalc doesn't price
-  IDPs, so DL/LB/DB fall back to a production-only dynasty valuation with a
-  neutral market leg.
+  surfaces in the player sheet as a **Buy-low / Sell-high / Fair** verdict (see
+  [Buy and sell](#buy-and-sell)), alongside contender- and rebuilder-lens
+  scores. FantasyCalc doesn't price IDPs, so DL/LB/DB fall back to a
+  production-only dynasty valuation with a neutral market leg.
+
+### Buy and sell
+
+The verdict is two percentiles, built the same way over the same population:
+where this model ranks a player among the priced players at his position, against
+where the market ranks him among that same set.
+
+Ranking them over *different* populations is what the verdict used to do, and it
+quietly turned the output into a restatement of "is he cheap". FantasyCalc prices
+68 of this league's 160 tight ends, so the market leg was a percentile among 68
+while every other leg was a percentile among all 160 — and the 92 unpriced tight
+ends sit below every priced one. Measured across the four priced groups, that put
+a player's market percentile 0.20–0.29 below his intrinsic one by construction,
+which is wider than the calling threshold. Simply having a price read as being
+underpriced:
+
+| | Buy | Fair | Sell |
+|---|---:|---:|---:|
+| Different pools | 55.6% | 42.9% | **1.5%** |
+| Same pool | 11.5% | 46.6% | 7.8% |
+
+Under the old comparison the model called Buy on 100% of the cheapest two market
+deciles and Sell on six players out of 399. The dynasty scores themselves are
+unaffected — this is the comparison, not the model.
+
+Two cases get an explicit abstention rather than a call:
+
+- **Thin market.** FantasyCalc's bottom fifth is rounding noise — values of 4, 15
+  and 34 against a 10,275 top — so a percentile gap there measures where a
+  worthless player happened to land, not disagreement.
+- **No read.** Without production the intrinsic side is a fixed prior rather than
+  an opinion, and a prior can only ever open a gap in one direction. Before this
+  abstention, 43 of 74 sells were players the model had nothing on: incoming
+  rookies the market prices on draft capital, which this model has no source for.
+  None of the buys had the same problem. Calling those a sell dresses an absence
+  of evidence up as disagreement.
+
+One property is structural rather than a defect: a player already at the top of
+his position's market has no headroom to be ranked above it, so the very top
+deciles produce no buys. Two percentiles cannot disagree past the end of the
+scale.
 
 Both halves show their own "why" breakdown in the player sheet. Every dynasty
 input is best-effort: a failed market or prior-season fetch degrades that half
@@ -90,13 +131,154 @@ good the player is, not whether the defence provides an advantage. The
 Analytics page retains the fuller defence-generosity profile for league-wide
 comparison.
 
-The leakage-safe 2023–2025 backtest covers 42,033 player-weeks and evaluates
-whether a matchup predicts performance above Sleeper's pregame projection. The
-new opponent-only score improved rank correlation from .028 to .043 in 2024 and
-from .005 to .022 in 2025. That is a real but modest edge, so Matchup remains a
-tiebreaker rather than a substitute for Value or projected points. Historical
-weeks use only results that were available before that game. Run `npm run
-research` to reproduce the report.
+The schedule adjustment is a **two-way additive fit** — conceded points modelled
+as a league mean plus an offence effect plus a defence effect, solved by
+alternating ridge least squares. The obvious alternative, subtracting the
+producing team's own average from each week's concession, has a hole: those
+offences played different schedules themselves, so an offence inflated by a soft
+run drags its victims down with it and a defence that happened to face good
+offences stays overrated. Solving both sides jointly lifted holdout rank
+correlation from .0147 to .0189, and the shipped `get()` measures .0196 against
+2025 residuals.
+
+### The matchup matters far more for some positions than others
+
+Holdout correlation between the chip and a player's miss against his projection:
+
+| QB | K | DL | WR | TE | RB | DB | LB |
+|---|---|---|---|---|---|---|---|
+| .093 | .058 | .044 | .026 | .016 | .017 | .004 | −.013 |
+
+Facing a soft defence is worth real points to a quarterback and nothing
+measurable to a linebacker, whose tackles accrue whether the opponent is good or
+bad. The score is never rescaled — rescaling was tried and could not be
+justified — but chips for positions below the influence floor are **dimmed and
+labelled**, so a column of 21 identical-looking pills doesn't present noise with
+the same confidence as signal.
+
+### Tried and rejected
+
+Kept here because negative results are the expensive ones to rediscover. Each
+looked good on validation and failed on the 2025 holdout:
+
+- **Per-scoring-category matching** — rating defences separately on sacks,
+  tackles, takeaways and so on, matched to a player's own production mix. The
+  most promising idea on paper for an IDP league where a sack pays 9 and a tackle
+  1.5. Validation .0436, holdout .0156 against .0189 for the simpler blend.
+- **Prior-season carryover** — best validation score of anything tested (.0456),
+  holdout .0176.
+- **Per-position blend weights** — chosen per group on validation, they got
+  *worse* on holdout for three of eight positions. The signal is ~.01–.09 on a
+  few thousand rows per position, which is not enough to fit eight weight
+  vectors without fitting noise.
+- **Scaling the chip by position influence** — helped on holdout, hurt on
+  validation, both near zero.
+- **Points allowed per opportunity** — no signal at all (.0023).
+
+Run `npm run research:matchup` to reproduce all of it.
+
+## Weekly forecasts, as distributions
+
+Every other number here is a point estimate, which is the wrong shape for the
+two questions actually asked on a Sunday: *what is my floor* and *can I still
+win*. Both need the spread, and the spread can't be asserted — it has to be
+measured against what projections have historically done.
+
+So for each position group the app fits the conditional distribution of a real
+custom-scored result given its projection, over every projected player-week
+already loaded. Three properties are measured rather than assumed:
+
+- **Bias.** Projections aren't centred on the outcome. Correcting that median
+  shift is what makes our central estimate better than the projection we started
+  from — worth 3.7% of MAE out of sample.
+- **Heteroskedasticity.** A 20-point projection is wrong by more points than a
+  5-point one, so the scale is fit as a line in the projection level. In 2025
+  that runs from `2.4 + 0.44·p` for a TE to `7.5` flat for a QB.
+- **Skew.** Fantasy outcomes aren't normal — a floor is bounded near zero while
+  a ceiling is a three-touchdown game. Assuming normality would understate every
+  ceiling. The shape is carried as the empirical quantiles of the standardised
+  residual, so whatever skew and fat-tailedness the real data has survives.
+
+A player who is projected but sometimes doesn't appear carries that too, as a
+point mass at zero — counted over the weeks he was *projected for*, never as a
+share of season weeks, which would bill every bye twice.
+
+### Per-player bias, and why it's an IDP-only correction
+
+Beyond the group-level shift, individual players are persistently mis-projected —
+but only in defensive positions. Correcting for a player's own history against
+his projection moves holdout MAE by:
+
+| LB | DB | DL | everyone else |
+|---|---|---|---|
+| +4.2% | +3.8% | +1.4% | ~0 |
+
+That asymmetry isn't a quirk of the fit, it's a fact about the source. Sleeper
+models quarterbacks and skill players carefully, so their residuals are close to
+noise and chasing them adds nothing; IDP projections are much cruder, closer to
+positional averages, so a linebacker's gap between projection and reality is
+real, stable, and never corrected upstream. Positions where the correction
+didn't earn its place carry a damping of zero.
+
+Two details that are easy to get wrong and were both got wrong first:
+
+- The correction is an **excess over the player's own position**, referenced to
+  the group *mean*. Using his absolute bias double-counts the group shift the
+  forecast already applied and pulls every team total ~9% low; referencing the
+  group *median* instead hands every player a small positive excess, because
+  residuals are right-skewed, and inflates the league ~5%. Averaged over a
+  position the correction must come out at zero — it redistributes points
+  between players, it doesn't create them. `verify:forecast` asserts this.
+- The simulator samples around **projection + shift**, not around the displayed
+  median. The median already contains the group's bias and so does the residual
+  draw; centring on it applies the same shift twice.
+
+### Verified out of sample
+
+`npm run research:forecast` fits on weeks 1–9 and scores weeks 10–17, so no
+evaluation week contributes to the distribution it is judged against. An interval
+claiming 80% should contain 80% of outcomes:
+
+```
+nominal      10%    25%    50%    75%    90%
+actual     11.0%  26.7%  50.9%  76.4%  90.8%    n = 14,200 player-weeks
+```
+
+Mean absolute coverage error 1.14 points. Point accuracy over the same held-out
+weeks: source projection MAE 4.663, bias-corrected median **4.492**.
+
+`npm run verify:forecast` is the deterministic half — it plants a known bias,
+spread and skew in synthetic data and asserts the fit recovers all three.
+
+## Win probability and playoff odds
+
+Team scores are simulated by drawing each starter from his own fitted
+distribution. Players who have already finished contribute their real score, so
+a week in progress updates as it plays; a week that's over is replayed from
+kickoff instead, because "you won" is not a probability.
+
+Each NFL team gets one shared shock per iteration, and players load onto it
+through a Gaussian copula — which induces the dependence without disturbing any
+of the skewed, heteroskedastic marginals above. This also correctly couples
+opposing managers who own players in the same NFL game.
+
+**The measured correlation is near zero** (0.007 in 2024, 0.000 in 2025), which
+was not the expected answer. Scores in *levels* are plainly correlated; residuals
+around a projection that already prices in the matchup, pace and opponent
+largely are not. The copula is kept because it costs nothing and the estimate is
+refit each season, but it is currently doing almost no work, and the honest
+reading is that independence would be a fine approximation here.
+
+Rest-of-season odds replay the remaining schedule 10,000 times carrying in the
+real record, then resolve the bracket under the league's own `playoff_teams` and
+`playoff_round_type`. Because it draws from a pool built once per team, it holds
+each team's weekly distribution fixed across the remaining schedule — byes,
+injuries and waiver moves after the starting week are not modelled.
+
+Team totals land slightly high, by 3.5% in 2025 and 2.5% in 2024, and their 80%
+bands are a touch wide (real totals fall outside them 12.8–18.8% of the time
+against a nominal 20%). With roughly 47 team-weeks per season those gaps sit
+inside sampling noise, but they are the direction of the error.
 
 ## Projection sources
 
@@ -163,7 +345,7 @@ here — there is nothing to run the league's scoring against.
 | **History** | Season trend: Projected vs Actual vs Optimal, week by week |
 | **Available Players** | Searchable browser over free agents and rostered players |
 | **Schedule** | The NFL week with rostered players, owners and custom scores overlaid |
-| **Analytics** | Standings, all-play record, schedule luck, power index, volatility and defensive generosity |
+| **Analytics** | Win probability, playoff odds, standings, all-play record, schedule luck, power index, volatility and defensive generosity |
 
 ### Power rankings
 
@@ -245,7 +427,23 @@ npm run verify:power
 ```
 
 ```bash
+npm run verify:dynasty
+```
+
+```bash
+npm run verify:forecast
+```
+
+```bash
 npm run research
+```
+
+```bash
+npm run research:forecast
+```
+
+```bash
+npm run research:matchup
 ```
 
 ```bash
@@ -278,11 +476,65 @@ needs changing even if the format does.
 A full season is ~11MB of JSON (17 weeks × stats + projections, plus a 2.5MB
 player dictionary). It's cached in IndexedDB with per-payload TTLs: completed
 weeks for 30 days, the live week for 2 minutes, and the current season projection
-for 6 hours. Recharts is code-split, keeping first paint to ~98KB gzipped.
+for 6 hours.
+
+Recharts is code-split, and so is **every page route**. The six pages are not the
+same size — Analytics alone carries the Monte Carlo and the bracket resolver,
+neither of which someone checking a lineup ever runs — and with a static import
+graph all of it is part of the first paint. Splitting at the route cuts the entry
+chunk from 40.9KB gzipped to 24.0KB, and moves ~21KB of page code (Analytics,
+the player sheet, the chart wrappers, the four other pages) off the critical path
+entirely. Landing on Teams now costs 104KB gzipped against 117KB.
+
+The split is otherwise invisible because the nav prefetches: hovering or
+tab-focusing a link starts its chunk fetch, so the module is usually parsed
+before the tap lands.
 
 Team-week views are memoized for the lifetime of a loaded season, so pages that
 share optimal-lineup, history and analytics data reuse the same derived result
 instead of rerunning the lineup matcher.
+
+## Failure modes, and what happens in each
+
+A read-only static site can't fix a bad payload, but it can avoid presenting one
+as a dead end.
+
+- **A page throws.** Error boundaries wrap the routed page and the app. A page
+  that fails leaves the header and tabs standing, so the reader walks to another
+  page — which clears the boundary on its own, since the path is its reset key.
+  The card offers a retry and a cache drop, because a payload persisted by an
+  older build deserializing into an unexpected shape is the likeliest cause and
+  would otherwise be re-read on every reload.
+- **A deploy lands while a tab is open.** Route chunks are content-hashed and the
+  Pages workflow redeploys on a daily cron, so a tab left open overnight holds
+  filenames the server no longer has. That surfaces as a failed dynamic import on
+  the next tab tapped. It's detected and answered with one automatic reload,
+  guarded by a 10-second cooldown so a genuinely broken deploy shows the card
+  instead of looping.
+- **Sleeper rate-limits.** A season load fires ~40 requests and Sleeper throttles
+  bursts during Sunday games, which is exactly when someone opens the app.
+  Requests retry three times with exponential backoff and jitter on 429 and 5xx,
+  honouring `Retry-After` when it's short enough to be worth waiting out; the
+  stats and projections endpoints then fall back to the other host. Permanent
+  answers — a 404 on a bracket that doesn't exist yet — are not retried.
+- **The same payload is asked for twice.** Cache reads are asynchronous, so two
+  callers a few milliseconds apart both miss and both fetch. In-flight requests
+  are shared by key, which matters on re-entry: StrictMode double-invokes every
+  effect in development, and tapping refresh or flicking between seasons starts a
+  second load over the same keys. A shared request that was *aborted* is not
+  inherited — the new caller issues its own rather than adopting someone else's
+  cancellation.
+
+## Installing it
+
+`manifest.webmanifest` makes the app installable on Android and desktop Chrome,
+which read nothing from the Apple meta tags. It ships a maskable icon as well as
+the plain one, because Android crops a launcher icon to the platform's own shape
+and an icon drawn edge to edge loses its corners.
+
+iOS is still on its own meta tags and, lacking a PNG `apple-touch-icon`, still
+falls back to a screenshot for the home-screen icon. A 180×180 PNG is the one
+asset left to add by hand.
 
 ## A note on the colour scale
 
@@ -293,3 +545,17 @@ value and offers a Table toggle, every chip prints its score, rank pills print
 "#11 Total", and boom/bust always ships an arrow icon plus a text label. Chart
 lines are the exception and use a CVD-validated categorical pair, since a line
 cannot label every point.
+
+## Keyboard and assistive technology
+
+Two things the rest of the app's care about colour didn't cover:
+
+- **The player sheet is a real modal.** `aria-modal` says the page behind is
+  inert but does nothing to the tab order, so focus is trapped inside the sheet
+  and cycled at its edges. On close it goes back to the row that opened it —
+  without that, a keyboard reader restarts at the top of the page every time they
+  look a player up, which in a 21-row lineup is the whole interaction.
+- **A skip link.** Six nav tabs sit between the top of the document and the
+  content on every navigation. The jump is done in JS rather than left to the
+  `#main` href: this app routes on the hash, so the fragment navigation would be
+  handed to the router as a route and move focus nowhere.

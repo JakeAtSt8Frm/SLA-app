@@ -39,12 +39,92 @@ export class SleeperError extends Error {
   }
 }
 
+/**
+ * Status codes worth trying again.
+ *
+ * 429 is the one that actually bites: a season load fires ~40 requests, and
+ * Sleeper throttles bursts during Sunday games — exactly when someone opens the
+ * app. The 5xx codes cover a gateway blip. Everything else (404 on a bracket that
+ * doesn't exist yet, 400 on a malformed week) is a permanent answer, and retrying
+ * it just delays the failure the caller already handles.
+ */
+const RETRYABLE = new Set([408, 425, 429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 3;
+const BASE_BACKOFF_MS = 400;
+
+const sleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+
+/** Honours `Retry-After` when the server sends one, in either of its two forms. */
+function retryAfterMs(header: string | null): number | null {
+  if (!header) return null;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const at = Date.parse(header);
+  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : null;
+}
+
 async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(url, { signal });
-  if (!res.ok) {
-    throw new SleeperError(`Request failed (${res.status})`, res.status, url);
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    let res: Response;
+
+    try {
+      res = await fetch(url, { signal });
+    } catch (err) {
+      // An abort is the caller changing their mind, not a failure to retry.
+      if (signal?.aborted) throw err;
+      lastError = err;
+      await backoff(attempt, null, signal);
+      continue;
+    }
+
+    if (res.ok) return (await res.json()) as T;
+
+    lastError = new SleeperError(`Request failed (${res.status})`, res.status, url);
+    if (!RETRYABLE.has(res.status)) throw lastError;
+
+    await backoff(attempt, retryAfterMs(res.headers.get('Retry-After')), signal);
   }
-  return (await res.json()) as T;
+
+  throw lastError instanceof Error
+    ? lastError
+    : new SleeperError('Request failed', undefined, url);
+}
+
+/**
+ * Waits before the next attempt, unless that was the last one.
+ *
+ * Exponential with jitter: a season load starts ~40 requests at the same instant,
+ * so a fixed delay would retry them all in the same burst that got throttled.
+ * A server's own `Retry-After` wins when it sends one and it is short enough to
+ * be worth waiting out — past that the fallback host is the better move, and the
+ * caller has one.
+ */
+async function backoff(attempt: number, advised: number | null, signal?: AbortSignal) {
+  if (attempt >= MAX_ATTEMPTS - 1) return;
+  const ADVICE_CAP_MS = 5000;
+  if (advised !== null && advised <= ADVICE_CAP_MS) {
+    await sleep(advised, signal);
+    return;
+  }
+  const wait = BASE_BACKOFF_MS * 2 ** attempt;
+  await sleep(wait + Math.random() * wait, signal);
 }
 
 /** Tries each URL in order, returning the first success. */

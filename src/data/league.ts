@@ -50,6 +50,7 @@ import {
   buildPregameMatchupIndexes,
   type MatchupIndex,
 } from '../lib/matchup';
+import { fitResidualModel, type ResidualModel } from '../lib/forecast';
 import { starterSlots } from '../lib/optimal';
 import { POSITION_GROUPS } from '../lib/types';
 import type {
@@ -166,6 +167,42 @@ export interface LeagueData {
   matchupIndex: MatchupIndex;
   /** Pregame ratings for historical weeks, containing earlier results only. */
   pregameMatchupIndexes: Map<number, MatchupIndex>;
+  /**
+   * Fitted projection-error distributions, per position group. Turns any
+   * projection into a distribution with a real floor and ceiling.
+   */
+  residualModel: ResidualModel;
+  /** Regular-season pairings for weeks that haven't been played yet. */
+  futureMatchups: Map<number, Matchup[]>;
+  playoff: PlayoffFormat;
+}
+
+export interface PlayoffFormat {
+  /** Teams that reach the playoff field. */
+  teams: number;
+  /** First playoff week; the regular season is everything before it. */
+  weekStart: number;
+  /** Weeks a playoff round spans. */
+  weeksPerRound: number;
+  /** Last regular-season week. */
+  regularSeasonWeeks: number;
+}
+
+/**
+ * Reads the league's own playoff configuration.
+ *
+ * Sleeper's `playoff_round_type` is an enum, not a count: 2 means every round
+ * spans two weeks, which is what this league uses (four playoff weeks, two
+ * rounds). Anything else is treated as a single week per round.
+ */
+export function playoffFormat(league: League): PlayoffFormat {
+  const weekStart = Number(league.settings?.playoff_week_start ?? 15);
+  return {
+    teams: Math.max(2, Number(league.settings?.playoff_teams ?? 4)),
+    weekStart,
+    weeksPerRound: Number(league.settings?.playoff_round_type ?? 0) === 2 ? 2 : 1,
+    regularSeasonWeeks: Math.max(1, weekStart - 1),
+  };
 }
 
 export interface LoadProgress {
@@ -683,6 +720,41 @@ export async function loadLeague(
     maxWeek,
   );
 
+  /*
+   * Projection-error distributions, fit on every projected player-week loaded
+   * above. This is what lets the app quote a floor and a ceiling instead of a
+   * single number, and it costs one extra pass over data already in memory.
+   */
+  const residualModel = fitResidualModel({
+    scoringModel,
+    playersById,
+    weekStats,
+    weekProjections,
+    weekTeams,
+    throughWeek: currentWeek,
+  });
+
+  /*
+   * Pairings for regular-season weeks still to be played. Results don't exist
+   * yet, but Sleeper publishes the schedule, and without it a rest-of-season
+   * simulation has nothing to simulate. Cheap (a few hundred bytes a week) and
+   * best-effort: a failure just shortens the horizon.
+   */
+  const format = playoffFormat(league);
+  const futureMatchups = new Map<number, Matchup[]>();
+  if (maxWeek > 0 && maxWeek < format.regularSeasonWeeks) {
+    const upcoming = Array.from(
+      { length: format.regularSeasonWeeks - maxWeek },
+      (_, i) => maxWeek + 1 + i,
+    );
+    await mapLimit(upcoming, 4, async (week) => {
+      const pairings = await cached(`matchups:${leagueId}:${week}`, TTL.LIVE_WEEK, () =>
+        getMatchups(leagueId, week, signal).catch(() => [] as Matchup[]),
+      ).catch(() => [] as Matchup[]);
+      if (pairings.length) futureMatchups.set(week, pairings);
+    });
+  }
+
   report('Loading dynasty inputs', 2, 3);
 
   // Dynasty inputs are all best-effort third-party / historical data: prior
@@ -807,6 +879,9 @@ export async function loadLeague(
     combinedScores,
     matchupIndex,
     pregameMatchupIndexes,
+    residualModel,
+    futureMatchups,
+    playoff: format,
   };
 }
 

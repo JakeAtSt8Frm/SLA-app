@@ -412,7 +412,7 @@ function TeamSide({
               </span>
               <span className="tiny muted">{p.ownerName}</span>
             </span>
-            <MatchupChip score={p.group ? matchupFor(opponent, p.group) : null} />
+            <MatchupChip score={p.group ? matchupFor(opponent, p.group) : null} group={p.group} />
             <span className="mono small bold" style={{ minWidth: 42, textAlign: 'right' }}>
               {p.played ? fmt1(p.points) : fmt1(p.projected)}
             </span>

@@ -6,12 +6,15 @@
 import { useMemo, useState } from 'react';
 import { useLeague, useLeagueData } from '../data/LeagueProvider';
 import { buildRosterWeek } from '../data/selectors';
+import { seasonOdds, weekIsComplete, weekOdds } from '../data/predictions';
 import {
   EmptyState,
   MatchupChip,
   PlacementBadge,
+  RangeReadout,
   StatTile,
   StatTileRow,
+  WinProbBar,
   fmt1,
   fmtPct,
   fmtSigned,
@@ -37,10 +40,26 @@ type PowerScope = 'ALL' | PositionGroup;
 
 export function AnalyticsPage() {
   const data = useLeagueData();
-  const { setSelectedRosterId } = useLeague();
+  const { setSelectedRosterId, week } = useLeague();
   const { mode } = useTheme();
   const [muGroup, setMuGroup] = useState<PositionGroup>('WR');
   const [powerScope, setPowerScope] = useState<PowerScope>('ALL');
+
+  /**
+   * Win probability for the selected week.
+   *
+   * A week still in progress is simulated live — finished players contribute
+   * their real score and only the rest is sampled. A finished week is replayed
+   * from kickoff instead, because "you won" is not a probability and the only
+   * interesting question left is what the odds were before it started.
+   */
+  const odds = useMemo(() => {
+    const complete = weekIsComplete(data, week);
+    const simulation = weekOdds(data, week, complete ? 'pregame' : 'live');
+    return simulation ? { simulation, pregame: complete } : null;
+  }, [data, week]);
+
+  const playoffOdds = useMemo(() => seasonOdds(data, week), [data, week]);
 
   /**
    * Build every team-week once. buildRosterWeek is memoized, so this also warms
@@ -316,6 +335,186 @@ export function AnalyticsPage() {
       <div style={{ height: 16 }} />
 
       <div className="stack">
+        {odds && (
+          <section className="card" style={{ overflow: 'hidden' }}>
+            <div className="group-head group-head--primary">
+              <span>
+                Week {week} · {odds.pregame ? 'pregame' : 'live'} win probability
+              </span>
+              <span className="mono">{odds.simulation.iterations.toLocaleString()} sims</span>
+            </div>
+            <div className="card-pad matchup-odds">
+              {odds.simulation.matchups.map((game) => {
+                const home = data.teamsById.get(game.home);
+                const away = data.teamsById.get(game.away);
+                if (!home || !away) return null;
+                const homeColor = teamColor(game.home, mode);
+                const awayColor = teamColor(game.away, mode);
+                const homeBand = odds.simulation.intervals.get(game.home);
+                const awayBand = odds.simulation.intervals.get(game.away);
+
+                return (
+                  <div key={game.matchupId} className="matchup-odds__row">
+                    <div className="matchup-odds__side">
+                      <button
+                        className="team-name"
+                        style={{ color: homeColor }}
+                        onClick={() => setSelectedRosterId(game.home)}
+                      >
+                        <span
+                          className="team-name__dot"
+                          style={{ background: homeColor }}
+                          aria-hidden="true"
+                        />
+                        {home.name}
+                      </button>
+                      <span className="matchup-odds__pct mono" style={{ color: homeColor }}>
+                        {fmtPct(game.homeWinProb)}
+                      </span>
+                      {homeBand && (
+                        <RangeReadout
+                          median={game.homeMean}
+                          low={homeBand[0]}
+                          high={homeBand[1]}
+                          size={13}
+                        />
+                      )}
+                    </div>
+
+                    <span className="tiny muted">vs</span>
+
+                    <div className="matchup-odds__side matchup-odds__side--away">
+                      <button
+                        className="team-name"
+                        style={{ color: awayColor }}
+                        onClick={() => setSelectedRosterId(game.away)}
+                      >
+                        {away.name}
+                        <span
+                          className="team-name__dot"
+                          style={{ background: awayColor }}
+                          aria-hidden="true"
+                        />
+                      </button>
+                      <span className="matchup-odds__pct mono" style={{ color: awayColor }}>
+                        {fmtPct(game.awayWinProb)}
+                      </span>
+                      {awayBand && (
+                        <RangeReadout
+                          median={game.awayMean}
+                          low={awayBand[0]}
+                          high={awayBand[1]}
+                          size={13}
+                        />
+                      )}
+                    </div>
+
+                    <div className="matchup-odds__bar">
+                      <WinProbBar
+                        homeProb={game.homeWinProb}
+                        awayProb={game.awayWinProb}
+                        homeColor={homeColor}
+                        awayColor={awayColor}
+                        label={`${home.name} ${Math.round(game.homeWinProb * 100)} percent, ${away.name} ${Math.round(game.awayWinProb * 100)} percent`}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="card-pad tiny muted" style={{ paddingTop: 0 }}>
+              Each score is drawn from its own fitted distribution — the projection
+              corrected for the bias that source has historically carried, widened
+              by the error it has historically made at that projection level. The
+              band beside each total is where 80% of simulated outcomes landed.
+            </p>
+          </section>
+        )}
+
+        {playoffOdds && (
+          <section className="card" style={{ overflow: 'hidden' }}>
+            <div className="group-head group-head--primary">
+              <span>Playoff odds entering Week {week}</span>
+              <span className="mono">
+                top {data.playoff.teams} of {data.teams.length}
+              </span>
+            </div>
+            <div className="scroll-x">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Team</th>
+                    <th className="num" title="Mean simulated regular-season wins">
+                      Proj. W
+                    </th>
+                    <th className="num">Playoff</th>
+                    <th className="num">Top seed</th>
+                    <th className="num">Final</th>
+                    <th className="num">Title</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...playoffOdds.byTeam.values()]
+                    .sort((a, b) => b.titleProb - a.titleProb || b.playoffProb - a.playoffProb)
+                    .map((row) => {
+                      const team = data.teamsById.get(row.rosterId);
+                      if (!team) return null;
+                      const color = teamColor(row.rosterId, mode);
+                      return (
+                        <tr key={row.rosterId}>
+                          <td>
+                            <button
+                              className="team-name"
+                              style={{ color }}
+                              onClick={() => setSelectedRosterId(row.rosterId)}
+                            >
+                              <span
+                                className="team-name__dot"
+                                style={{ background: color }}
+                                aria-hidden="true"
+                              />
+                              {team.name}
+                            </button>
+                          </td>
+                          <td className="num">{row.expectedWins.toFixed(1)}</td>
+                          <td className="num bold odds-cell">
+                            {fmtPct(row.playoffProb)}
+                            <span className="odds-cell__track">
+                              <span
+                                className="odds-cell__fill"
+                                style={{ width: `${row.playoffProb * 100}%`, background: color }}
+                              />
+                            </span>
+                          </td>
+                          <td className="num muted">{fmtPct(row.topSeedProb)}</td>
+                          <td className="num muted">{fmtPct(row.finalProb)}</td>
+                          <td className="num bold odds-cell">
+                            {fmtPct(row.titleProb)}
+                            <span className="odds-cell__track">
+                              <span
+                                className="odds-cell__fill"
+                                style={{ width: `${row.titleProb * 100}%`, background: color }}
+                              />
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+            <p className="card-pad tiny muted" style={{ paddingTop: 0 }}>
+              {playoffOdds.regularSeasonComplete
+                ? `The regular season is already settled, so seeding is fixed and only the bracket is simulated.`
+                : `Weeks ${playoffOdds.simulatedWeeks[0]}–${
+                    playoffOdds.simulatedWeeks[playoffOdds.simulatedWeeks.length - 1]
+                  } replayed ${playoffOdds.iterations.toLocaleString()} times, carrying in the real record through Week ${week - 1}, then the bracket resolved under the league's own format.`}{' '}
+              Each team's weekly scoring is held at the lineup it had in Week{' '}
+              {Math.min(week, data.currentWeek)}.
+            </p>
+          </section>
+        )}
+
         <section className="card" style={{ overflow: 'hidden' }}>
           <div className="group-head group-head--primary">
             <span>Standings &amp; team metrics</span>
@@ -530,7 +729,7 @@ export function AnalyticsPage() {
                   <tr key={defense.defense}>
                     <td className="bold">{defense.defense}</td>
                     <td className="num">
-                      <MatchupChip score={defense.score} />
+                      <MatchupChip score={defense.score} group={muGroup} />
                     </td>
                     <td className="num bold">{fmt1(defense.pointsPerGame)}</td>
                     <td className="num">{fmt1(defense.last4)}</td>

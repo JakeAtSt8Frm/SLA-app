@@ -11,10 +11,25 @@
     <meta name="description" content="Custom-scored analytics for the SLA fantasy league." />
     <meta name="theme-color" content="#1a1a19" />
 
-    <!-- Installable to the iOS home screen -->
+    <!--
+      Installable. The manifest is what Android and desktop Chrome read: without
+      it the app is not installable at all there, however many Apple meta tags
+      are present. Relative URLs inside it resolve against the manifest's own
+      location, which keeps it working from a project page, a user page or disk —
+      the same reason the bundle uses a relative base.
+    -->
+    <link rel="manifest" href="./manifest.webmanifest" />
+
+    <!-- iOS reads none of the above, so it keeps its own set. -->
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="SLA" />
+    <!--
+      No apple-touch-icon: iOS only reads PNG there, and shipping a link to the
+      SVG would be markup that never resolves. Until a 180x180 PNG is added, iOS
+      keeps using its screenshot fallback — which is what it already did.
+    -->
 
     <!-- Warm the connections the first paint depends on -->
     <link rel="preconnect" href="https://api.sleeper.app" crossorigin />
