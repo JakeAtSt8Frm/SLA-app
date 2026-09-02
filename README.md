@@ -341,11 +341,12 @@ here — there is nothing to run the league's scoring against.
 | Page | What it answers |
 |---|---|
 | **Teams** | Roster by slot group, with a positional heatmap |
+| **Matchups** | Who plays who in the selected week, the record each side carries in, and live or pregame win probability |
 | **Optimal Lineup** | The best legal lineup, and what it cost to miss it |
 | **History** | Season trend: Projected vs Actual vs Optimal, week by week |
 | **Available Players** | Searchable browser over free agents and rostered players |
 | **Schedule** | The NFL week with rostered players, owners and custom scores overlaid |
-| **Analytics** | Win probability, playoff odds, standings, all-play record, schedule luck, power index, volatility and defensive generosity |
+| **Analytics** | Playoff odds, standings, all-play record, schedule luck, power index, volatility and defensive generosity |
 
 ### Power rankings
 
@@ -478,13 +479,15 @@ player dictionary). It's cached in IndexedDB with per-payload TTLs: completed
 weeks for 30 days, the live week for 2 minutes, and the current season projection
 for 6 hours.
 
-Recharts is code-split, and so is **every page route**. The six pages are not the
-same size — Analytics alone carries the Monte Carlo and the bracket resolver,
-neither of which someone checking a lineup ever runs — and with a static import
-graph all of it is part of the first paint. Splitting at the route cuts the entry
-chunk from 40.9KB gzipped to 24.0KB, and moves ~21KB of page code (Analytics,
-the player sheet, the chart wrappers, the four other pages) off the critical path
-entirely. Landing on Teams now costs 104KB gzipped against 117KB.
+Recharts is code-split, and so is **every page route**. The seven pages are not
+the same size — Matchups and Analytics share the Monte Carlo, which lands in its
+own chunk rather than in either page, and Analytics carries the bracket resolver
+on top of it; none of that is run by someone checking a lineup — and with a
+static import graph all of it is part of the first paint. Splitting at the route
+cuts the entry chunk from 40.9KB gzipped to 24.6KB, and moves ~25KB of page code
+(Analytics, the shared simulator, the player sheet, the chart wrappers, the five
+other pages) off the critical path entirely. Landing on Teams now costs 105KB
+gzipped against 117KB.
 
 The split is otherwise invisible because the nav prefetches: hovering or
 tab-focusing a link starts its chunk fetch, so the module is usually parsed

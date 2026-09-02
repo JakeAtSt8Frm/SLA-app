@@ -6,9 +6,11 @@ import { AppShell } from './components/AppShell';
  * Pages are loaded on demand.
  *
  * The landing route is Teams, but a static import graph makes every page's cost
- * part of the first paint — and the pages are not the same size. Analytics alone
- * pulls in the Monte Carlo simulator and the playoff bracket resolver, neither of
- * which a reader checking a lineup ever runs. Splitting at the route lets each
+ * part of the first paint — and the pages are not the same size. Matchups and
+ * Analytics pull in the Monte Carlo simulator, and Analytics the playoff bracket
+ * resolver on top of it, none of which a reader checking a lineup ever runs.
+ * (The simulator is imported by both, so it lands in a chunk of its own rather
+ * than being duplicated into each.) Splitting at the route lets each
  * page's code arrive when it is first visited, which on a phone on stadium wifi
  * is the difference that matters.
  *
@@ -16,6 +18,9 @@ import { AppShell } from './components/AppShell';
  * charts fetches two small chunks rather than one large one.
  */
 const TeamsPage = lazy(() => import('./pages/Teams').then((m) => ({ default: m.TeamsPage })));
+const MatchupsPage = lazy(() =>
+  import('./pages/Matchups').then((m) => ({ default: m.MatchupsPage })),
+);
 const OptimalPage = lazy(() =>
   import('./pages/Optimal').then((m) => ({ default: m.OptimalPage })),
 );
@@ -38,13 +43,13 @@ export default function App() {
       <Route path="/" element={<AppShell />}>
         <Route index element={<Navigate to="/teams" replace />} />
         <Route path="teams" element={<TeamsPage />} />
+        <Route path="matchups" element={<MatchupsPage />} />
         <Route path="optimal" element={<OptimalPage />} />
         <Route path="history" element={<HistoryPage />} />
         <Route path="players" element={<PlayersPage />} />
         <Route path="schedule" element={<SchedulePage />} />
         <Route path="analytics" element={<AnalyticsPage />} />
         {/* Routes that existed before the nav was trimmed. */}
-        <Route path="matchups" element={<Navigate to="/teams" replace />} />
         <Route path="trade" element={<Navigate to="/players" replace />} />
         <Route path="*" element={<Navigate to="/teams" replace />} />
       </Route>

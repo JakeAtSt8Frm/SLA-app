@@ -24,6 +24,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: '/teams', label: 'Teams', short: 'Teams', icon: '▣', prefetch: () => import('../pages/Teams') },
+  { to: '/matchups', label: 'Matchups', short: 'H2H', icon: '⇄', prefetch: () => import('../pages/Matchups') },
   { to: '/optimal', label: 'Optimal Lineup', short: 'Optimal', icon: '✦', prefetch: () => import('../pages/Optimal') },
   { to: '/history', label: 'History', short: 'History', icon: '◷', prefetch: () => import('../pages/History') },
   { to: '/players', label: 'Available Players', short: 'Players', icon: '⌕', prefetch: () => import('../pages/Players') },
@@ -64,7 +65,7 @@ export function AppShell() {
 
   return (
     <div className="app">
-      {/* Six tab stops separate a keyboard or switch user from the content on
+      {/* Seven tab stops separate a keyboard or switch user from the content on
           every single navigation. This is the standard escape hatch: hidden
           until focused, first in the tab order.
 

@@ -1092,3 +1092,80 @@
 .chip--weak {
   opacity: 0.45;
 }
+
+/* ------------------------------------------------------ head-to-head board --- */
+
+/*
+ * "Who plays who" for one week: one card per game, two rows per card.
+ *
+ * The pairing is the point, so the two teams sit in the same column grid and
+ * the scores align on the right edge — the eye reads down the column and the
+ * gap between the numbers *is* the margin. The leading side is bolder and in
+ * primary ink; the note underneath spells the margin out in words, so the
+ * emphasis is never the only channel carrying it.
+ */
+.h2h {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+}
+
+.h2h__game {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+
+.h2h__side {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'name score'
+    'record proj';
+  align-items: baseline;
+  column-gap: 10px;
+  row-gap: 1px;
+}
+
+.h2h__name {
+  grid-area: name;
+  overflow: hidden;
+}
+
+.h2h__name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.h2h__record {
+  grid-area: record;
+}
+
+.h2h__score {
+  grid-area: score;
+  justify-self: end;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.h2h__score.is-leading {
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.h2h__proj {
+  grid-area: proj;
+  justify-self: end;
+}
+
+.h2h__note {
+  margin-top: 2px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border);
+}
