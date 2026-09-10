@@ -77,4 +77,35 @@ const noProjection = new Map(weeks);
 noProjection.set(2, { ...weeks.get(2)!, projections: {} });
 assert.equal(seasonPowerRankings({ ...data, weeks: noProjection }, 2)[0].projection, null, 'absent forecast data is not a zero-point forecast');
 
-console.log('Season power: chronological scoring, projections, missing data, ties, live availability and Value independence passed.');
+const secondTeam: TeamInfo = { ...team, rosterId: 2, roster: { ...team.roster, roster_id: 2, players: ['5', '6', '7'], starters: ['5', '6', '7'] } };
+const firstTeam: TeamInfo = { ...team, roster: { ...team.roster, players: ['1', '2', '3', '4'], starters: ['1', '2', '3'] } };
+const positions = new Map<string, Player>([
+  ['1', { ...player, position: 'WR' }], ['2', { ...player, player_id: '2', position: 'RB' }],
+  ['3', { ...player, player_id: '3', position: 'QB' }], ['4', { ...player, player_id: '4', position: 'WR' }],
+  ['5', { ...player, player_id: '5', position: 'WR' }], ['6', { ...player, player_id: '6', position: 'RB' }],
+  ['7', { ...player, player_id: '7', position: 'QB' }],
+]);
+const groupStats = { '1': { rec: 1, rec_yd: 200 }, '2': { rec: 1, rec_yd: 100 }, '3': { rec: 1, rec_yd: 50 }, '4': { rec: 1, rec_yd: 10000 },
+  '5': { rec: 1, rec_yd: 50 }, '6': { rec: 1, rec_yd: 300 }, '7': { rec: 1, rec_yd: 100 } };
+const groupProjections = { '1': { rec_yd: 100 }, '2': { rec_yd: 50 }, '3': { rec_yd: 200 }, '4': { rec_yd: 10000 },
+  '5': { rec_yd: 50 }, '6': { rec_yd: 400 }, '7': { rec_yd: 200 } };
+const positionalWeeks = new Map<number, WeekData>([1, 2].map((week) => [week, {
+  week, stats: week === 1 ? groupStats : {}, projections: groupProjections, opponents: {}, teams: {},
+  matchups: [firstTeam, secondTeam].map((team) => ({ roster_id: team.rosterId, matchup_id: 1, points: 0,
+    players: team.roster.players, starters: team.roster.starters })),
+}]));
+const positionalData = { ...data, teams: [firstTeam, secondTeam], teamsById: new Map([[1, firstTeam], [2, secondTeam]]),
+  playersById: positions, starterSlots: ['WR', 'RB', 'SUPER_FLEX'], weeks: positionalWeeks };
+assert.deepEqual(seasonPowerRankings(positionalData, 2).map((row) => row.rosterId), [2, 1]);
+const receivers = seasonPowerRankings(positionalData, 2, 'WR');
+assert.deepEqual(receivers.map((row) => row.rosterId), [1, 2], 'positional rankings must reorder on position scoring, not overall strength');
+assert.equal(receivers[0].score, 17.5, 'RB, QB and bench WR scoring must not enter starting WR power');
+assert.equal(seasonPowerRankings(positionalData, 2, 'RB')[0].score, 32.5);
+assert.equal(seasonPowerRankings(positionalData, 2, 'QB').find((row) => row.rosterId === 1)?.score, 8.75, 'superflex QBs must count as quarterbacks');
+assert.equal(seasonPowerRankings(positionalData, 2, 'K')[0].score, 0, 'an empty position is zero when the lineup and projections are known');
+assert.equal(seasonPowerRankings(positionalData, 1, 'WR')[0].score, 10, 'positional week-one power uses only that position’s projection');
+const noReceiverProjection = new Map(positionalWeeks);
+noReceiverProjection.set(2, { ...positionalWeeks.get(2)!, projections: { '2': { rec_yd: 50 } } });
+assert.equal(seasonPowerRankings({ ...positionalData, weeks: noReceiverProjection }, 2, 'WR')[0].projection, null, 'another position’s projection cannot stand in for a missing positional forecast');
+
+console.log('Season power: chronology, positional scoring, flex slots, projections, missing data, ties, live availability and Value independence passed.');

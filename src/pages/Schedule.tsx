@@ -492,6 +492,5 @@ function MatchupStats({ home, away, week, teams, index }: {
         <tr><th scope="row">Games sampled</th><td>{homeAllowed?.games ?? '—'}</td><td>{awayAllowed?.games ?? '—'}</td></tr>
       </tbody>
     </table>
-    <p className="tiny muted">Allowance is the whole position group per game, using your league’s scoring. {['DL', 'LB', 'DB'].includes(group) ? 'For IDP, it measures defensive points yielded by the opposing offense.' : 'Higher ratings indicate more favorable opponents.'}</p>
   </div>;
 }

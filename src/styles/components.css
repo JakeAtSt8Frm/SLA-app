@@ -63,7 +63,7 @@
  * weight, matching the monochrome icons used elsewhere in the app.
  */
 .topbar__icon {
-  font-size: 17px;
+  font-size: 20px;
   line-height: 1;
   font-variant-emoji: text;
 }
@@ -74,17 +74,17 @@
  * two icons look the same size.
  */
 .topbar__icon--refresh {
-  font-size: 19px;
+  font-size: 22px;
 }
 
 @media (max-width: 760px) {
   .topbar__icon {
-    font-size: 19px;
-    min-width: 40px;
+    font-size: 22px;
+    min-width: 42px;
   }
 
   .topbar__icon--refresh {
-    font-size: 22px;
+    font-size: 25px;
   }
 }
 
@@ -634,15 +634,20 @@
 }
 
 .heatmap__team-col {
-  width: 82px;
+  width: 94px;
 }
 
+/* The right padding is the gutter between the names and the first colour cell.
+   Without it the fills butt up against the text and the grid reads as one
+   cluttered block; the column is widened by the same amount so names keep the
+   room they had. */
 .heatmap__team-head,
 .heatmap__team {
   text-align: left !important;
   position: sticky;
   left: 0;
   padding-left: 4px !important;
+  padding-right: 12px !important;
   background: var(--surface);
   z-index: 1;
 }
@@ -1026,7 +1031,13 @@
 
   .power-track {
     grid-column: 2 / -1;
+    grid-row: 2;
     height: 10px;
+  }
+
+  .power-value {
+    grid-column: 3;
+    grid-row: 1;
   }
 
   .rank-chart__legend {

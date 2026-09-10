@@ -18,7 +18,7 @@ import { fmt1, fmtPct, fmtSigned, StatusBadge, ValueChip } from './primitives';
 import { enrichPlayer } from '../data/selectors';
 import { VALUE_WEIGHTS } from '../lib/value';
 import { DYNASTY_WEIGHTS } from '../lib/dynasty';
-import { PlayerContext } from './PlayerContext';
+import { PlayerAvailability, PlayerOpportunity } from './PlayerContext';
 
 interface Props {
   pid: string | null;
@@ -216,65 +216,6 @@ export function PlayerModal({ pid, week, onClose }: Props) {
         </header>
 
         <div className="sheet__body">
-          <PlayerContext player={p.player} />
-          {/* ---- This week's forecast distribution ---- */}
-          {forecast && (
-            <section>
-              <h3 className="section-title">
-                Week {week} forecast
-                {forecast.actual !== null && ' — how it looked beforehand'}
-              </h3>
-              <div className="metric-grid">
-                <Metric
-                  label="Expected"
-                  value={fmt1(forecast.mean)}
-                  sub={`source says ${fmt1(forecast.projection)}`}
-                />
-                <Metric label="Floor" value={fmt1(forecast.p10)} sub="10th pct" />
-                <Metric label="Likely" value={`${fmt1(forecast.p25)}–${fmt1(forecast.p75)}`} sub="middle half" />
-                <Metric label="Ceiling" value={fmt1(forecast.p90)} sub="90th pct" />
-                {forecast.playProb < 1 && (
-                  <Metric
-                    label="Plays"
-                    value={fmtPct(forecast.playProb)}
-                    sub="when projected"
-                  />
-                )}
-                {forecast.actual !== null && (
-                  <Metric label="Actual" value={fmt1(forecast.actual)} />
-                )}
-              </div>
-              <p className="small muted" style={{ marginTop: 6 }}>
-                The source projection corrected for the bias it has carried at this
-                level, and widened by the error it has historically made there. Eight
-                of ten weeks like this land between {fmt1(forecast.p10)} and{' '}
-                {fmt1(forecast.p90)}.
-              </p>
-            </section>
-          )}
-
-          {/* ---- Weekly projected vs actual ---- */}
-          <section>
-            <h3 className="section-title">
-              Projected Score vs Actual Score, by week
-            </h3>
-
-            {chart.length === 0 ? (
-              <div className="card card-pad muted small">
-                No scoring weeks recorded this season.
-              </div>
-            ) : (
-              <>
-                <LazyWeeklyScoreChart data={chart} height={240} />
-
-                <div className="small muted" style={{ marginTop: 4 }}>
-                  Beat projection in {beats} of {projectedWeeks} projected weeks
-                  {played !== projectedWeeks && ` (${played} played)`}.
-                </div>
-              </>
-            )}
-          </section>
-
           {/* ---- Season profile ---- */}
           {value && (
             <section>
@@ -340,6 +281,103 @@ export function PlayerModal({ pid, week, onClose }: Props) {
             </section>
           )}
 
+          {/* ---- Weekly projected vs actual ---- */}
+          <section>
+            <h3 className="section-title">
+              Projected Score vs Actual Score, by week
+            </h3>
+
+            {chart.length === 0 ? (
+              <div className="card card-pad muted small">
+                No scoring weeks recorded this season.
+              </div>
+            ) : (
+              <>
+                <LazyWeeklyScoreChart data={chart} height={240} />
+
+                <div className="small muted" style={{ marginTop: 4 }}>
+                  Beat projection in {beats} of {projectedWeeks} projected weeks
+                  {played !== projectedWeeks && ` (${played} played)`}.
+                </div>
+              </>
+            )}
+          </section>
+
+          {/* ---- Schedule and projections ---- */}
+          {forecast && (
+            <section>
+              <h3 className="section-title">
+                Week {week} forecast
+                {forecast.actual !== null && ' — how it looked beforehand'}
+              </h3>
+              <div className="metric-grid">
+                <Metric
+                  label="Expected"
+                  value={fmt1(forecast.mean)}
+                  sub={`source says ${fmt1(forecast.projection)}`}
+                />
+                <Metric label="Floor" value={fmt1(forecast.p10)} sub="10th pct" />
+                <Metric label="Likely" value={`${fmt1(forecast.p25)}–${fmt1(forecast.p75)}`} sub="middle half" />
+                <Metric label="Ceiling" value={fmt1(forecast.p90)} sub="90th pct" />
+                {forecast.playProb < 1 && (
+                  <Metric
+                    label="Plays"
+                    value={fmtPct(forecast.playProb)}
+                    sub="when projected"
+                  />
+                )}
+                {forecast.actual !== null && (
+                  <Metric label="Actual" value={fmt1(forecast.actual)} />
+                )}
+              </div>
+            </section>
+          )}
+
+          {matchup && (
+            <section>
+              <h3 className="section-title">
+                Matchup vs {matchup.defense}
+              </h3>
+              <div className="metric-grid">
+                <Metric
+                  label="Matchup score"
+                  value={String(matchup.score)}
+                />
+                <Metric label="Defence baseline" value={String(matchup.baseScore)} />
+                <Metric
+                  label="Adjusted-allowed score"
+                  value={String(matchup.opponentAdjustedScore)}
+                />
+                <Metric
+                  label="Opportunity score"
+                  value={String(matchup.opportunityScore)}
+                />
+                <Metric
+                  label="Allowed / game"
+                  value={fmt1(matchup.pointsPerGame)}
+                  sub={`to ${matchup.group}s`}
+                />
+                <Metric
+                  label="Adjusted allowed"
+                  value={fmt1(matchup.opponentAdjustedPpg)}
+                />
+                <Metric
+                  label="Opportunities allowed"
+                  value={fmt1(matchup.opportunitiesPerGame)}
+                />
+                <Metric label="Last 4" value={fmt1(matchup.last4)} />
+                <Metric
+                  label="Generosity rank"
+                  value={`#${matchup.rankMostGenerous}`}
+                  sub="1 = most generous"
+                />
+                <Metric label="Ceiling rate" value={fmtPct(matchup.ceilingRate)} />
+                <Metric label="Floor rate" value={fmtPct(matchup.floorRate)} />
+              </div>
+            </section>
+          )}
+
+          <PlayerOpportunity player={p.player} />
 
           {/* ---- Dynasty profile ---- */}
           {dynasty && (
@@ -485,51 +523,6 @@ export function PlayerModal({ pid, week, onClose }: Props) {
             </section>
           )}
 
-          {/* ---- This week's matchup ---- */}
-          {matchup && (
-            <section>
-              <h3 className="section-title">
-                Matchup vs {matchup.defense}
-              </h3>
-              <div className="metric-grid">
-                <Metric
-                  label="Matchup score"
-                  value={String(matchup.score)}
-                />
-                <Metric label="Defence baseline" value={String(matchup.baseScore)} />
-                <Metric
-                  label="Adjusted-allowed score"
-                  value={String(matchup.opponentAdjustedScore)}
-                />
-                <Metric
-                  label="Opportunity score"
-                  value={String(matchup.opportunityScore)}
-                />
-                <Metric
-                  label="Allowed / game"
-                  value={fmt1(matchup.pointsPerGame)}
-                  sub={`to ${matchup.group}s`}
-                />
-                <Metric
-                  label="Adjusted allowed"
-                  value={fmt1(matchup.opponentAdjustedPpg)}
-                />
-                <Metric
-                  label="Opportunities allowed"
-                  value={fmt1(matchup.opportunitiesPerGame)}
-                />
-                <Metric label="Last 4" value={fmt1(matchup.last4)} />
-                <Metric
-                  label="Generosity rank"
-                  value={`#${matchup.rankMostGenerous}`}
-                  sub="1 = most generous"
-                />
-                <Metric label="Ceiling rate" value={fmtPct(matchup.ceilingRate)} />
-                <Metric label="Floor rate" value={fmtPct(matchup.floorRate)} />
-              </div>
-            </section>
-          )}
-
           {/* ---- Week-by-week table (the non-visual view of the chart) ---- */}
           {weekly.length > 0 && (
             <section>
@@ -631,6 +624,9 @@ export function PlayerModal({ pid, week, onClose }: Props) {
               Week {week} classification, using this league's scoring.
             </span>
           </div>
+
+          {/* ---- Today's NFL status, deliberately last ---- */}
+          <PlayerAvailability player={p.player} />
         </div>
       </div>
     </div>

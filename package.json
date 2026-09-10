@@ -18,6 +18,7 @@
     "research:forecast": "tsx scripts/research-forecast.ts",
     "research:matchup": "tsx scripts/research-matchup.ts",
     "research": "tsx scripts/research-models.ts",
+    "research:backtest": "tsx scripts/research-backtest.ts",
     "verify": "tsx scripts/verify-scoring.ts",
     "verify:dynasty": "tsx scripts/verify-dynasty-projections.ts",
     "verify:forecast": "tsx scripts/verify-forecast.ts",

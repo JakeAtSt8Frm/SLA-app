@@ -8,7 +8,6 @@ import { useLeague, useLeagueData } from '../data/LeagueProvider';
 import { buildRosterWeek } from '../data/selectors';
 import { seasonOdds } from '../data/predictions';
 import { seasonPowerRankings } from '../data/seasonPower';
-import { SEASON_POWER_WEIGHTS } from '../lib/seasonPower';
 import {
   EmptyState,
   MatchupChip,
@@ -36,17 +35,19 @@ interface AllPlayRecord {
   ties: number;
 }
 
-type OutlookScope = 'ALL' | PositionGroup;
+type RankingScope = 'ALL' | PositionGroup;
 
 export function AnalyticsPage() {
   const data = useLeagueData();
   const { setSelectedRosterId, week } = useLeague();
   const { mode } = useTheme();
   const [muGroup, setMuGroup] = useState<PositionGroup>('WR');
-  const [outlookScope, setOutlookScope] = useState<OutlookScope>('ALL');
+  const [powerScope, setPowerScope] = useState<RankingScope>('ALL');
+  const [outlookScope, setOutlookScope] = useState<RankingScope>('ALL');
 
   const playoffOdds = useMemo(() => seasonOdds(data, week), [data, week]);
-  const seasonPower = useMemo(() => seasonPowerRankings(data, week), [data, week]);
+  const seasonPower = useMemo(() => seasonPowerRankings(data, week, powerScope), [data, week, powerScope]);
+  const bestSeasonPower = Math.max(0, ...seasonPower.map((row) => row.score ?? 0));
 
   /**
    * Build every team-week once. buildRosterWeek is memoized, so this also warms
@@ -394,15 +395,6 @@ export function AnalyticsPage() {
                 </tbody>
               </table>
             </div>
-            <p className="card-pad tiny muted" style={{ paddingTop: 0 }}>
-              {playoffOdds.regularSeasonComplete
-                ? `The regular season is already settled, so seeding is fixed and only the bracket is simulated.`
-                : `Weeks ${playoffOdds.simulatedWeeks[0]}–${
-                    playoffOdds.simulatedWeeks[playoffOdds.simulatedWeeks.length - 1]
-                  } replayed ${playoffOdds.iterations.toLocaleString()} times, carrying in the real record through Week ${week - 1}, then the bracket resolved under the league's own format.`}{' '}
-              Each team's weekly scoring is held at the lineup it had in Week{' '}
-              {Math.min(week, data.currentWeek)}.
-            </p>
           </section>
         )}
 
@@ -491,62 +483,60 @@ export function AnalyticsPage() {
         <section
           className="card"
           style={{ overflow: 'hidden' }}
-          aria-describedby="power-formula"
           aria-labelledby="power-title"
         >
           <div className="group-head group-head--primary">
             <h2 id="power-title" style={{ fontSize: 'inherit' }}>Power Rankings</h2>
             <span className="mono">{data.season} · Entering Week {week}</span>
           </div>
-          <p id="power-formula" className="card-pad small muted" style={{ paddingBottom: 0 }}>
-            Season scoring {fmtPct(SEASON_POWER_WEIGHTS.average)} · last four completed weeks {fmtPct(SEASON_POWER_WEIGHTS.recentAverage)} · Week {week} starter projection {fmtPct(SEASON_POWER_WEIGHTS.projection)}.
-            {' '}Only {data.season} results before Week {week} count. Missing inputs are omitted and the remaining weights rescaled.
-          </p>
-          <div className="scroll-x">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th scope="col">Rank</th>
-                  <th scope="col">Team</th>
-                  <th scope="col" className="num" title="Weighted fantasy points per week; higher is stronger">Power / wk</th>
-                  <th scope="col" className="num">Avg / wk</th>
-                  <th scope="col" className="num">Last 4</th>
-                  <th scope="col" className="num">W{week} proj.</th>
-                  <th scope="col" className="num">Weeks</th>
-                </tr>
-              </thead>
-              <tbody>
-                {seasonPower.map((row) => {
-                  const team = data.teamsById.get(row.rosterId);
-                  if (!team) return null;
-                  const color = teamColor(team.rosterId, mode);
-                  return <tr key={row.rosterId}>
-                    <td className="mono muted">{row.rank ?? '—'}</td>
-                    <td>
-                      <button className="team-name" style={{ color }} onClick={() => setSelectedRosterId(row.rosterId)}>
-                        <span className="team-name__dot" style={{ background: color }} aria-hidden="true" />
-                        {team.name}
-                      </button>
-                    </td>
-                    <td className="num bold">{row.score === null ? '—' : fmt1(row.score)}</td>
-                    <td className="num">{row.average === null ? '—' : fmt1(row.average)}</td>
-                    <td className="num">{row.recentAverage === null ? '—' : fmt1(row.recentAverage)}</td>
-                    <td className="num">{row.projection === null ? '—' : fmt1(row.projection)}</td>
-                    <td className="num muted">{row.games}</td>
-                  </tr>;
-                })}
-              </tbody>
-            </table>
+          <div className="card-pad power-controls">
+            <div className="segmented" role="group" aria-label="Power ranking scope">
+              <button aria-pressed={powerScope === 'ALL'} onClick={() => setPowerScope('ALL')}>
+                Overall
+              </button>
+              {POSITION_GROUPS.map((group) => (
+                <button key={group} aria-pressed={powerScope === group} onClick={() => setPowerScope(group)}>
+                  {group}
+                </button>
+              ))}
+            </div>
           </div>
-          <p className="card-pad tiny muted" style={{ paddingTop: 0 }}>
-            Based on starting lineups and your league’s scoring. — means no usable data; Week 1 uses projections only.
-          </p>
+          <div className="card-pad power-list">
+            {seasonPower.map((row) => {
+              const team = data.teamsById.get(row.rosterId);
+              if (!team) return null;
+              const color = teamColor(team.rosterId, mode);
+              const index = round(powerIndexOf(row.score ?? 0, bestSeasonPower), 1);
+              const format = (value: number | null) => value === null ? '—' : fmt1(value);
+              const breakdown = `Season avg ${format(row.average)} · Last 4 ${format(row.recentAverage)} · W${week} projection ${format(row.projection)} · ${row.games} completed weeks`;
+              return (
+                <div key={row.rosterId} className="power-row">
+                  <span className="power-rank mono bold">{row.rank ?? '—'}</span>
+                  <button className="team-name power-team" style={{ color }} onClick={() => setSelectedRosterId(row.rosterId)}>
+                    <span className="team-name__dot" style={{ background: color }} aria-hidden="true" />
+                    {team.name}
+                  </button>
+                  {row.score === null ? <span className="power-track" aria-hidden="true" /> : (
+                    <span className="power-track" role="meter"
+                      aria-label={`${team.name} ${powerScope === 'ALL' ? 'overall' : powerScope} season power index`}
+                      aria-valuemin={0} aria-valuemax={100} aria-valuenow={index}
+                      aria-valuetext={`${format(row.score)} weighted points per week. ${breakdown}`}
+                      title={breakdown}>
+                      {index > 0 && <span className="power-fill" style={{ width: `${index}%`, background: color }} />}
+                    </span>
+                  )}
+                  <span className="power-value mono bold" title={`${format(row.score)} weighted points per week. ${breakdown}`}>
+                    {format(row.score)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         </section>
 
         <section
           className="card"
           style={{ overflow: 'hidden' }}
-          aria-describedby="outlook-formula"
           aria-labelledby="outlook-title"
         >
           <div className="group-head group-head--primary">
@@ -557,12 +547,6 @@ export function AnalyticsPage() {
                 : `${outlookScope} · ${POSITION_POWER_COUNTS[outlookScope].starters} + ${POSITION_POWER_COUNTS[outlookScope].bench} depth`}
             </span>
           </div>
-          <p id="outlook-formula" className="card-pad small muted" style={{ paddingBottom: 0 }}>
-            Roster value blends in-season and dynasty player scores, adjusted for current NFL availability. Includes bench, taxi and reserve players.
-            {' '}{outlookScope === 'ALL'
-              ? 'Each position uses 85% starter value and 15% depth; overall weights positions by starter count.'
-              : `${outlookScope} uses 85% of the top ${POSITION_POWER_COUNTS[outlookScope].starters} players’ Value Scores and 15% of the next ${POSITION_POWER_COUNTS[outlookScope].bench}.`}
-          </p>
           <div className="card-pad power-controls">
             <div className="segmented" role="group" aria-label="Team outlook scope">
               <button

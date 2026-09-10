@@ -417,12 +417,6 @@ export function MatchupsPage() {
                 );
               })}
             </div>
-            <p className="card-pad tiny muted" style={{ paddingTop: 0 }}>
-              Each score is drawn from its own fitted distribution — the projection
-              corrected for the bias that source has historically carried, widened
-              by the error it has historically made at that projection level. The
-              band beside each total is where 80% of simulated outcomes landed.
-            </p>
           </section>
         )}
       </div>

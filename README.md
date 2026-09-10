@@ -247,6 +247,16 @@ Two details that are easy to get wrong and were both got wrong first:
 evaluation week contributes to the distribution it is judged against. An interval
 claiming 80% should contain 80% of outcomes:
 
+
+`npm run research:backtest` asks the other question: of everything measured,
+what carries the information? It walks forward through 2022–2025 for expected
+score and 2024–2025 for lineups (the league's own history starts in 2024) and
+scores every signal against what happened. Headline results: the bias-corrected
+projection is the best single predictor and its gain is almost entirely IDP;
+recent form is a poor predictor alone but adds real independent signal in a
+blend; and a projection-ranked lineup would have beaten the managers' actual
+lineups by about 30 points a week. See [the backtest](docs/model-backtest.md).
+
 ```
 nominal      10%    25%    50%    75%    90%
 actual     11.0%  26.7%  50.9%  76.4%  90.8%    n = 14,200 player-weeks
@@ -367,6 +377,11 @@ omitted and weights rescaled. A recorded zero still counts. The displayed score
 is weighted points per week, not a win probability. These are transparent policy
 weights, not a backtested forecasting model.
 
+Overall and QB/RB/WR/TE/K/DL/LB/DB tabs each show ranked team bars, scaled to the
+strongest team in that view. Positional rankings use only starters at that
+football position, including players in flex slots, with the same season/recent/
+projection weights. Hover a score or bar for its scoring breakdown.
+
 No headline Value Scores, dynasty valuations, age, market price or future-season
 projections enter Power Rankings. Explicit roster-season overrides replay the
 chosen roster against the selected scoring season, matching the other pages.
@@ -473,6 +488,10 @@ npm run research:forecast
 
 ```bash
 npm run research:matchup
+```
+
+```bash
+npm run research:backtest
 ```
 
 ```bash
