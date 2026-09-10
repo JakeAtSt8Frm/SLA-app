@@ -768,9 +768,47 @@
 }
 
 .page-title {
-  font-size: 22px;
+  font-size: clamp(24px, 3vw, 32px);
   font-weight: 800;
   letter-spacing: -0.02em;
+}
+
+.eyebrow { color: var(--accent); font-size: 10px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; margin: 0 0 5px; }
+.page-description { color: var(--text-secondary); font-size: 13px; margin: 6px 0 0; line-height: 1.5; }
+.data-note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 14px; margin-bottom: 16px; background: var(--accent-wash); border: 1px solid var(--border); border-radius: var(--radius); font-size: 11px; color: var(--text-secondary); }
+.data-note__dot { height: 6px; width: 6px; border-radius: 50%; background: var(--accent); }
+.availability-badge { display: inline-flex; align-items: center; padding: 2px 6px; border-radius: 5px; font-size: 10px; line-height: 1.45; font-weight: 650; background: var(--surface-sunken); color: var(--text-secondary); border: 1px solid var(--border); white-space: nowrap; }
+.availability-badge--practice-squad { color: var(--accent); background: var(--accent-wash); }
+.availability-badge--reserve, .availability-badge--out, .availability-badge--suspended, .availability-badge--doubtful { color: var(--danger-text); }
+.availability-badge--active { color: var(--success-text); }
+.availability-panel { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); background: linear-gradient(125deg, var(--accent-wash), var(--surface)); }
+.availability-panel p, .context-details p, .matchup-preview p { line-height: 1.6; margin: 10px 0 0; }
+.context-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 14px 0; }
+.context-grid dt { color: var(--text-secondary); font-size: 11px; margin-bottom: 3px; }
+.context-grid dd { margin: 0; font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
+.value-adjustment { display: flex; flex-wrap: wrap; gap: 5px 14px; border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; font-size: 12px; }
+.value-adjustment > p { flex-basis: 100%; }
+.context-details { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
+.context-details summary { cursor: pointer; font-weight: 650; font-size: 13px; }
+.context-details summary span { margin-left: 8px; font-weight: 400; }
+.table-scroll { overflow-x: auto; }
+.context-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+.context-table th, .context-table td { padding: 8px 6px; text-align: left; border-bottom: 1px solid var(--border); }
+.context-table thead th { font-size: 10px; color: var(--text-secondary); font-weight: 650; }
+.context-table tbody th { font-weight: 400; color: var(--text-secondary); }
+.context-table tr:last-child td, .context-table tr:last-child th { border-bottom: 0; }
+.schedule-card { box-shadow: var(--shadow-sm); }
+.matchup-preview { padding: 16px; background: linear-gradient(130deg, var(--accent-wash), transparent 60%); border-bottom: 1px solid var(--border); }
+.matchup-table { table-layout: fixed; }
+.matchup-table th:first-child { width: 46%; }
+.matchup-table td, .matchup-table th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+.matchup-table tbody td { font-family: var(--font-mono); }
+@media (max-width: 520px) {
+  .matchup-preview { padding: 12px; }
+  .context-table { font-size: 11px; }
+  .context-table th, .context-table td { padding: 7px 3px; }
+  .data-note { gap: 6px 10px; }
+  .data-note > span:last-child { flex-basis: 100%; }
 }
 
 /* Page heading gets a short accent rule above it — a quiet bit of colour that

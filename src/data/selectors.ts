@@ -9,6 +9,7 @@
 
 import { groupForPlayer, hasPlayed } from '../lib/scoring';
 import { classifyStatus } from '../lib/status';
+import { usesCurrentAvailability } from '../lib/availability';
 import { computeOptimalLineup, lineupEfficiency, slotAccepts } from '../lib/optimal';
 import type { EnrichedPlayer, PositionGroup, StatLine } from '../lib/types';
 import { isOut, playerName, type LeagueData, type TeamInfo } from './league';
@@ -56,9 +57,11 @@ export function enrichPlayer(
   const group = groupForPlayer(player);
   const playerTeam = (weekData?.teams[pid] ?? player?.team ?? '').toUpperCase();
 
-  const proj = data.score(projLine);
   const act = data.score(statLine);
   const played = hasPlayed(statLine);
+  const currentStatusApplies = usesCurrentAvailability(data.nflState, data.season, week);
+  const unavailable = currentStatusApplies && isOut(player) && !played;
+  const proj = unavailable ? 0 : data.score(projLine);
 
   const matchupIndex = data.pregameMatchupIndexes.get(week) ?? data.matchupIndex;
   const matchup = matchupIndex.get(group, opponent);
@@ -84,7 +87,7 @@ export function enrichPlayer(
      * Out" because he happens to be on IR today. If he recorded stats that
      * week, he plainly was not out.
      */
-    isOut: isOut(player) && !played,
+    isOut: unavailable,
     seasonTotal: data.valueIndex.seasonTotals.get(pid) ?? 0,
     // The headline Value Score is the blended in-season + dynasty number.
     valueScore: data.combinedScores.get(pid) ?? data.valueIndex.byPlayer.get(pid)?.score ?? null,

@@ -35,6 +35,11 @@ jobs:
 
       - run: npm ci
 
+      - run: npm run refresh:nfl-context
+        continue-on-error: true
+
+      - run: npm run verify:availability && npm run verify:metrics
+
       # Neither source allows browser CORS, so normalize their public projection
       # pages into the static artifact at build time. They refresh as separate
       # steps so one site being down does not cost us the other's update, and

@@ -21,6 +21,8 @@ import {
   fmt1,
 } from './primitives';
 import type { EnrichedPlayer } from '../lib/types';
+import { AvailabilityBadge } from './AvailabilityBadge';
+import { rosterStatus, ROSTER_LABELS } from '../lib/availability';
 
 interface Props {
   player: EnrichedPlayer;
@@ -67,7 +69,7 @@ export function PlayerRow({ player: p, onSelect, showProjection = true, note }: 
       type="button"
       onClick={() => onSelect?.(p.pid)}
       className="player-row"
-      aria-label={`${p.name}, ${p.group ?? 'unknown position'}, ${
+      aria-label={`${p.name}, ${p.group ?? 'unknown position'}, currently ${ROSTER_LABELS[rosterStatus(p.player)]}, ${
         p.hasPlayed ? `scored ${fmt1(p.act)}` : `projected ${fmt1(p.proj)}`
       }`}
     >
@@ -81,11 +83,7 @@ export function PlayerRow({ player: p, onSelect, showProjection = true, note }: 
           <ValueChip score={p.valueScore} />
           <RankPill rank={p.totalRank} kind="Total" />
           <RankPill rank={p.ppgRank} kind="PPG" />
-          {p.isOut && (
-            <span className="chip" style={{ color: 'var(--danger-text)' }}>
-              OUT
-            </span>
-          )}
+          <AvailabilityBadge player={p.player} />
         </span>
         <span className="tiny muted">
           {p.team || '—'}
@@ -160,6 +158,7 @@ export function PlayerCard({ player: p, onSelect }: Props) {
       </div>
 
       <div className="row wrap" style={{ gap: 6 }}>
+        <AvailabilityBadge player={p.player} />
         <ValueChip score={p.valueScore} />
         <RankPill rank={p.totalRank} kind="Total" />
         <RankPill rank={p.ppgRank} kind="PPG" />

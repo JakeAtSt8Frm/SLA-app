@@ -76,6 +76,24 @@ export interface Player {
   age?: number | null;
   birth_date?: string | null;
   injury_status?: string | null;
+  injury_body_part?: string | null;
+  injury_start_date?: string | null;
+  injury_notes?: string | null;
+  practice_participation?: string | null;
+  practice_description?: string | null;
+  gsis_id?: string | null;
+  espn_id?: string | number | null;
+  currentInjury?: {
+    status: string;
+    injury: string;
+    returnDate: string | null;
+    reportedAt: string;
+    asOf: string;
+    gamesBeforeReturn: number | null;
+    remainingGames: number;
+  };
+  /** Current, dated NFL roster evidence; independent of fantasy ownership. */
+  nflRoster?: { status: string; team: string; asOf: string; week: number };
   status?: string | null;
   depth_chart_position?: string | null;
   depth_chart_order?: number | null;

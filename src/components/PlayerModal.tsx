@@ -18,6 +18,7 @@ import { fmt1, fmtPct, fmtSigned, StatusBadge, ValueChip } from './primitives';
 import { enrichPlayer } from '../data/selectors';
 import { VALUE_WEIGHTS } from '../lib/value';
 import { DYNASTY_WEIGHTS } from '../lib/dynasty';
+import { PlayerContext } from './PlayerContext';
 
 interface Props {
   pid: string | null;
@@ -53,7 +54,7 @@ export function PlayerModal({ pid, week, onClose }: Props) {
       if (!root) return [];
       return [
         ...root.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          'a[href], button:not([disabled]), summary, input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
         ),
       ].filter((el) => el.offsetParent !== null || el === document.activeElement);
     };
@@ -184,7 +185,7 @@ export function PlayerModal({ pid, week, onClose }: Props) {
           <div className="grow" style={{ minWidth: 0 }}>
             <h2 style={{ fontSize: 18, fontWeight: 800, lineHeight: 1.25 }}>{p.name}</h2>
             <div className="small muted">
-              {p.group} · {p.team || 'Free agent'}
+              {p.group} · {p.team || 'No NFL team'}
               {p.player.age ? ` · age ${p.player.age}` : ''}
               {p.player.years_exp !== null && p.player.years_exp !== undefined
                 ? ` · ${p.player.years_exp}y exp`
@@ -215,6 +216,7 @@ export function PlayerModal({ pid, week, onClose }: Props) {
         </header>
 
         <div className="sheet__body">
+          <PlayerContext player={p.player} />
           {/* ---- This week's forecast distribution ---- */}
           {forecast && (
             <section>
@@ -225,7 +227,7 @@ export function PlayerModal({ pid, week, onClose }: Props) {
               <div className="metric-grid">
                 <Metric
                   label="Expected"
-                  value={fmt1(forecast.median)}
+                  value={fmt1(forecast.mean)}
                   sub={`source says ${fmt1(forecast.projection)}`}
                 />
                 <Metric label="Floor" value={fmt1(forecast.p10)} sub="10th pct" />
@@ -318,7 +320,7 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                 )}
                 {value.breakdown.recentOpportunityShare !== null && (
                   <Metric
-                    label="Team opportunity share"
+                    label="Position-group opportunity share"
                     value={fmtPct(value.breakdown.recentOpportunityShare)}
                   />
                 )}
@@ -342,7 +344,7 @@ export function PlayerModal({ pid, week, onClose }: Props) {
           {/* ---- Dynasty profile ---- */}
           {dynasty && (
             <section>
-              <h3 className="section-title">Dynasty {dynasty.score}</h3>
+              <h3 className="section-title">Dynasty base score · {dynasty.score}</h3>
               <div
                 className="row wrap"
                 style={{ gap: 6, marginBottom: 8, alignItems: 'center' }}
@@ -351,7 +353,7 @@ export function PlayerModal({ pid, week, onClose }: Props) {
                 <VerdictChip verdict={dynasty.breakdown.verdict} />
                 <span className="chip chip-outline">Market: {dynasty.breakdown.marketTrend}</span>
                 <span className="chip chip-outline">Liquidity: {dynasty.breakdown.liquidity}</span>
-                <span className="chip chip-outline">Injury: {dynasty.breakdown.injuryRisk}</span>
+                <span className="chip chip-outline" title="Based on recorded participation, not diagnosed injury recurrence">Participation risk: {dynasty.breakdown.injuryRisk}</span>
               </div>
               <div className="metric-grid">
                 <Metric
@@ -582,7 +584,7 @@ export function PlayerModal({ pid, week, onClose }: Props) {
           {value && (
             <section>
               <h3 className="section-title">
-                Why Value {value.score}
+                In-season base score · {value.score}
               </h3>
               <div className="small muted" style={{ marginBottom: 8 }}>
                 Each term is a percentile within {value.group}, times its weight.

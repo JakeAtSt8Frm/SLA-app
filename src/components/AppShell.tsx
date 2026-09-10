@@ -60,7 +60,8 @@ export function AppShell() {
   const headerHidden = useHideOnScroll();
   const location = useLocation();
 
-  const weeks = data ? Array.from({ length: data.maxWeek }, (_, i) => i + 1) : [];
+  const weekCount = data ? Math.max(data.maxWeek, location.pathname === '/schedule' ? 18 : week) : 0;
+  const weeks = Array.from({ length: weekCount }, (_, i) => i + 1);
   const rostersOverridden = rosterSeason !== season;
 
   return (

@@ -8,6 +8,9 @@
  */
 
 import { cached, TTL } from './cache';
+import { availabilityAdjustedValue, unavailableNow } from '../lib/availability';
+import { applyRosterSnapshot, getRosterSnapshot } from '../lib/nflContext';
+import { applyCurrentInjuries, getCurrentInjuries } from '../lib/currentInjuries';
 import {
   getAllPlayers,
   getLeague,
@@ -146,6 +149,7 @@ export interface LeagueData {
   scoringModel: ScoringModel;
   score: (stats: StatLine | undefined | null) => number;
   playersById: Map<string, Player>;
+  nflRosterAsOf: string | null;
   teams: TeamInfo[];
   teamsById: Map<number, TeamInfo>;
   weeks: Map<number, WeekData>;
@@ -571,7 +575,7 @@ export async function loadLeague(
 
   report('Loading rosters', 0, 1);
 
-  const [users, rosters, playersRaw, bracket, rosterLeague] = await Promise.all([
+  const [users, rosters, playersRaw, bracket, rosterLeague, nflRosters, currentInjuries] = await Promise.all([
     cached(`users:${rosterLeagueId}`, TTL.ROSTERS, () => getUsers(rosterLeagueId, signal)),
     cached(`rosters:${rosterLeagueId}`, TTL.ROSTERS, () => getRosters(rosterLeagueId, signal)),
     cached(`players`, TTL.PLAYERS, () => getAllPlayers(signal)),
@@ -582,6 +586,8 @@ export async function loadLeague(
     rostersAreOverridden
       ? cached(`league:${rosterLeagueId}`, TTL.LEAGUE, () => getLeague(rosterLeagueId, signal))
       : Promise.resolve(null),
+    getRosterSnapshot(nflState.season, signal),
+    getCurrentInjuries(nflState.season, signal),
   ]);
 
   const placements = placementsFromBracket(bracket as BracketMatch[]);
@@ -589,6 +595,8 @@ export async function loadLeague(
     [...placements.entries()].find(([, place]) => place === 1)?.[0] ?? null;
 
   const playersById = new Map<string, Player>(Object.entries(playersRaw));
+  applyRosterSnapshot(playersById, nflRosters);
+  applyCurrentInjuries(playersById, currentInjuries);
   const usersById = new Map<string, SleeperUser>(users.map((u) => [u.user_id, u]));
 
   const teams: TeamInfo[] = rosters
@@ -648,8 +656,8 @@ export async function loadLeague(
         week,
         stats: stats.stats,
         projections: projections.stats,
-        opponents: stats.opponents,
-        teams: stats.teams,
+        opponents: { ...projections.opponents, ...stats.opponents },
+        teams: { ...projections.teams, ...stats.teams },
         matchups,
       });
 
@@ -850,9 +858,8 @@ export async function loadLeague(
   for (const pid of scoredPids) {
     const v = valueIndex.byPlayer.get(pid)?.score ?? null;
     const d = dynastyIndex.byPlayer.get(pid)?.score ?? null;
-    if (v !== null && d !== null) combinedScores.set(pid, Math.round((v + d) / 2));
-    else if (v !== null) combinedScores.set(pid, v);
-    else if (d !== null) combinedScores.set(pid, d);
+    const adjusted = availabilityAdjustedValue(playersById.get(pid), v, d);
+    if (adjusted !== null) combinedScores.set(pid, adjusted);
   }
 
   report('Ready', 3, 3);
@@ -868,6 +875,7 @@ export async function loadLeague(
     scoringModel,
     score,
     playersById,
+    nflRosterAsOf: nflRosters?.asOf ?? null,
     teams,
     teamsById: new Map(teams.map((t) => [t.rosterId, t])),
     weeks,
@@ -897,24 +905,8 @@ export function playerName(player: Player | undefined, pid: string): string {
   return joined || `Player ${pid}`;
 }
 
-/** Statuses that mean a player cannot play this week. */
-const OUT_STATUSES = new Set([
-  'OUT',
-  'IR',
-  'PUP',
-  'NFI',
-  'SUSP',
-  'SUSPENDED',
-  'COVID',
-  'INACTIVE',
-  'DNR',
-  'NA',
-]);
-
 export function isOut(player: Player | undefined): boolean {
-  if (!player) return false;
-  const status = String(player.injury_status ?? player.status ?? '').trim().toUpperCase();
-  return OUT_STATUSES.has(status);
+  return unavailableNow(player);
 }
 
 export { groupForPlayer };

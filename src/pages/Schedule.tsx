@@ -15,6 +15,11 @@ import { useLeague, useLeagueData } from '../data/LeagueProvider';
 import { cached, TTL } from '../data/cache';
 import { getSchedule, teamLogo } from '../lib/sleeper';
 import { groupForPlayer } from '../lib/scoring';
+import { enrichPlayer } from '../data/selectors';
+import { buildTeamStats, type TeamStats } from '../lib/teamStats';
+import type { MatchupIndex } from '../lib/matchup';
+import { AvailabilityBadge } from '../components/AvailabilityBadge';
+import type { Player } from '../lib/types';
 import { PlayerModal } from '../components/PlayerModal';
 import {
   EmptyState,
@@ -46,6 +51,7 @@ interface GamePlayer {
   played: boolean;
   ownerName: string;
   isStarter: boolean;
+  player: Player;
 }
 
 export function SchedulePage() {
@@ -111,27 +117,25 @@ export function SchedulePage() {
   /** Rostered players grouped by the NFL team they play for. */
   const playersByTeam = useMemo(() => {
     const map = new Map<string, GamePlayer[]>();
-    const weekData = data.weeks.get(week);
 
     for (const [pid, owner] of ownership) {
-      const player = data.playersById.get(pid);
-      const nflTeam = (player?.team ?? '').toUpperCase();
+      const enriched = enrichPlayer(data, pid, week, '', owner.isStarter);
+      const player = enriched.player;
+      const nflTeam = enriched.team;
       if (!nflTeam) continue;
-
-      const statLine = weekData?.stats[pid];
-      const projLine = weekData?.projections[pid];
 
       const entry: GamePlayer = {
         pid,
+        player,
         name:
           player?.full_name ??
           [player?.first_name, player?.last_name].filter(Boolean).join(' ') ??
           pid,
         team: nflTeam,
         group: groupForPlayer(player),
-        points: data.score(statLine),
-        projected: data.score(projLine),
-        played: !!statLine,
+        points: enriched.act,
+        projected: enriched.proj,
+        played: enriched.hasPlayed,
         ownerName: owner.ownerName,
         isStarter: owner.isStarter,
       };
@@ -157,7 +161,7 @@ export function SchedulePage() {
   const weekGames = useMemo(
     () =>
       (games ?? [])
-        .filter((g) => g.week === week)
+        .filter((g) => g.week === week && !['canceled', 'cancelled'].includes(g.status.toLowerCase()))
         .sort((a, b) => a.date.localeCompare(b.date) || a.home.localeCompare(b.home)),
     [games, week],
   );
@@ -186,16 +190,26 @@ export function SchedulePage() {
     }
     let n = 0;
     for (const pid of ownership.keys()) {
-      const t = (data.playersById.get(pid)?.team ?? '').toUpperCase();
+      const t = (data.weeks.get(week)?.teams[pid] ?? data.playersById.get(pid)?.team ?? '').toUpperCase();
       if (t && !playing.has(t)) n++;
     }
     return n;
-  }, [weekGames, ownership, data]);
+  }, [weekGames, ownership, data, week]);
+
+  const teamStats = useMemo(() => buildTeamStats(data.weeks, week), [data, week]);
+  // An empty week-one index is intentional: later results would leak into a pregame view.
+  const matchupIndex = data.pregameMatchupIndexes.get(week)
+    ?? (data.matchupIndex.throughWeek < week ? data.matchupIndex : undefined);
 
   return (
     <>
       <div className="page-head">
-        <h1 className="page-title">Schedule</h1>
+        <div>
+          <p className="eyebrow">The week ahead</p>
+          <h1 className="page-title">Schedule & matchups</h1>
+          <p className="page-description">Both sides of every game, with the numbers behind the matchup.</p>
+          <p className="tiny muted">Player status badges show today’s status; team assignments and scores use the selected week.</p>
+        </div>
       </div>
 
       <div className="filters">
@@ -231,7 +245,7 @@ export function SchedulePage() {
           <StatTileRow>
             <StatTile label="Games" value={String(weekGames.length)} />
             <StatTile
-              label="Rostered players active"
+              label="Players on scheduled teams"
               value={String(
                 weekGames.reduce(
                   (n, g) =>
@@ -253,9 +267,11 @@ export function SchedulePage() {
                 key={game.game_id}
                 game={game}
                 playersByTeam={playersByTeam}
+                teamStats={teamStats}
+                matchupIndex={matchupIndex}
+                week={week}
                 matchupFor={(defense, group) =>
-                  (data.pregameMatchupIndexes.get(week) ?? data.matchupIndex)
-                    .get(group, defense)?.score ?? null
+                  matchupIndex?.get(group, defense)?.score ?? null
                 }
                 onSelect={setOpenPid}
                 highlightOwner={onlyMine ? selectedTeamName : undefined}
@@ -282,12 +298,18 @@ function GameCard({
   matchupFor,
   onSelect,
   highlightOwner,
+  teamStats,
+  matchupIndex,
+  week,
 }: {
   game: Game;
   playersByTeam: Map<string, GamePlayer[]>;
   matchupFor: (defense: string, group: PositionGroup) => number | null;
   onSelect: (pid: string) => void;
   highlightOwner?: string;
+  teamStats: Map<string, TeamStats>;
+  matchupIndex?: MatchupIndex;
+  week: number;
 }) {
   const home = playersByTeam.get(game.home) ?? [];
   const away = playersByTeam.get(game.away) ?? [];
@@ -301,7 +323,7 @@ function GameCard({
     list.reduce((s, p) => s + (p.played ? p.points : 0), 0);
 
   return (
-    <section className="card" style={{ overflow: 'hidden' }}>
+    <section className="card schedule-card" style={{ overflow: 'hidden' }}>
       <header className="group-head group-head--primary">
         <span className="row" style={{ gap: 8 }}>
           <TeamMark team={game.away} />
@@ -317,6 +339,8 @@ function GameCard({
           {game.status === 'complete' ? ' · final' : ''}
         </span>
       </header>
+
+      <MatchupStats home={game.home} away={game.away} week={week} teams={teamStats} index={matchupIndex} />
 
       <div className="game-grid">
         <TeamSide
@@ -411,6 +435,7 @@ function TeamSide({
                 {p.name}
               </span>
               <span className="tiny muted">{p.ownerName}</span>
+              <span className="row wrap" style={{ gap: 4 }}><AvailabilityBadge player={p.player} /></span>
             </span>
             <MatchupChip score={p.group ? matchupFor(opponent, p.group) : null} group={p.group} />
             <span className="mono small bold" style={{ minWidth: 42, textAlign: 'right' }}>
@@ -425,3 +450,48 @@ function TeamSide({
 
 /** Position groups, re-exported for the filter UI if it grows. */
 export { POSITION_GROUPS };
+
+function MatchupStats({ home, away, week, teams, index }: {
+  home: string; away: string; week: number; teams: Map<string, TeamStats>; index?: MatchupIndex;
+}) {
+  const [group, setGroup] = useState<PositionGroup>('QB');
+  const homeAllowed = index?.get(group, home);
+  const awayAllowed = index?.get(group, away);
+  const homeStats = teams.get(home);
+  const awayStats = teams.get(away);
+  const format = (value: number | null | undefined) => value == null ? '—' : fmt1(value);
+  const rows: Array<[string, number | null | undefined, number | null | undefined]> = [
+    ['Passing yards / game', awayStats?.passYards, homeStats?.passYards],
+    ['Rushing yards / game', awayStats?.rushYards, homeStats?.rushYards],
+    ['Pass attempts / game', awayStats?.passAttempts, homeStats?.passAttempts],
+    ['Rush attempts / game', awayStats?.rushAttempts, homeStats?.rushAttempts],
+    ['Sacks taken / game', awayStats?.sacksTaken, homeStats?.sacksTaken],
+  ];
+  return <div className="matchup-preview">
+    <div className="row-between wrap" style={{ gap: 8 }}>
+      <h3 className="small bold">Pregame comparison</h3>
+      <span className="tiny muted">{week === 1 ? 'No earlier games this season' : `Through week ${week - 1}`}</span>
+    </div>
+    <table className="context-table matchup-table">
+      <thead><tr><th>Team offense</th><th>{away}</th><th>{home}</th></tr></thead>
+      <tbody>{rows.map(([label, a, h]) => <tr key={label}><th scope="row">{label}</th><td>{format(a)}</td><td>{format(h)}</td></tr>)}</tbody>
+    </table>
+    <div className="row-between wrap" style={{ marginTop: 12, gap: 8 }}>
+      <label className="small bold" htmlFor={`position-${away}-${home}`}>Opponent allowance by position</label>
+      <select className="select" id={`position-${away}-${home}`} value={group} onChange={(e) => setGroup(e.target.value as PositionGroup)}>
+        {POSITION_GROUPS.map((position) => <option key={position}>{position}</option>)}
+      </select>
+    </div>
+    <table className="context-table matchup-table">
+      <thead><tr><th>{group} matchup</th><th>{away} faces {home}</th><th>{home} faces {away}</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Matchup rating</th><td><MatchupChip score={homeAllowed?.score ?? null} group={group} /></td><td><MatchupChip score={awayAllowed?.score ?? null} group={group} /></td></tr>
+        <tr><th scope="row">Custom points allowed / game</th><td>{format(homeAllowed?.pointsPerGame)}</td><td>{format(awayAllowed?.pointsPerGame)}</td></tr>
+        <tr><th scope="row">Schedule-adjusted points / game</th><td>{format(homeAllowed?.opponentAdjustedPpg)}</td><td>{format(awayAllowed?.opponentAdjustedPpg)}</td></tr>
+        <tr><th scope="row">Last 4 points / game</th><td>{format(homeAllowed?.last4)}</td><td>{format(awayAllowed?.last4)}</td></tr>
+        <tr><th scope="row">Games sampled</th><td>{homeAllowed?.games ?? '—'}</td><td>{awayAllowed?.games ?? '—'}</td></tr>
+      </tbody>
+    </table>
+    <p className="tiny muted">Allowance is the whole position group per game, using your league’s scoring. {['DL', 'LB', 'DB'].includes(group) ? 'For IDP, it measures defensive points yielded by the opposing offense.' : 'Higher ratings indicate more favorable opponents.'}</p>
+  </div>;
+}

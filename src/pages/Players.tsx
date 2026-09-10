@@ -14,6 +14,7 @@ import { PlayerRow } from '../components/PlayerRow';
 import { PlayerModal } from '../components/PlayerModal';
 import { EmptyState } from '../components/primitives';
 import { POSITION_GROUPS, type PositionGroup } from '../lib/types';
+import { rosterStatus, ROSTER_LABELS, type NflRosterStatus } from '../lib/availability';
 
 type Availability = 'free' | 'rostered' | 'all';
 type SortKey = 'value' | 'ppg' | 'total' | 'last4' | 'boomRate';
@@ -26,6 +27,7 @@ export function PlayersPage() {
   const [sort, setSort] = useState<SortKey>('value');
   const [query, setQuery] = useState('');
   const [openPid, setOpenPid] = useState<string | null>(null);
+  const [nflStatus, setNflStatus] = useState<NflRosterStatus | 'all'>('all');
 
   // Keeps typing responsive while the list re-filters.
   const deferredQuery = useDeferredValue(query);
@@ -37,6 +39,7 @@ export function PlayersPage() {
     const rows: Array<{ pid: string; sortValue: number }> = [];
 
     for (const [pid, combinedScore] of data.combinedScores) {
+      if (nflStatus !== 'all' && rosterStatus(data.playersById.get(pid)) !== nflStatus) continue;
       const value = data.valueIndex.byPlayer.get(pid) ?? null;
       const dynasty = data.dynastyIndex.byPlayer.get(pid) ?? null;
       const playerGroup = value?.group ?? dynasty?.group ?? null;
@@ -83,12 +86,24 @@ export function PlayersPage() {
       player: enrichPlayer(data, r.pid, data.currentWeek, '', false),
       owner: ownerByPid.get(r.pid)?.name ?? null,
     }));
-  }, [data, group, availability, rosterId, sort, deferredQuery, ownerByPid]);
+  }, [data, group, availability, rosterId, sort, deferredQuery, ownerByPid, nflStatus]);
 
   return (
     <>
       <div className="page-head">
-        <h1 className="page-title">Available Players</h1>
+        <div>
+          <p className="eyebrow">Scout • compare • decide</p>
+          <h1 className="page-title">Player explorer</h1>
+          <p className="page-description">Current NFL availability meets your league’s scoring.</p>
+        </div>
+      </div>
+
+      <div className="data-note">
+        <span className="data-note__dot" aria-hidden="true" />
+        {data.nflRosterAsOf
+          ? `NFL roster snapshot · ${new Date(data.nflRosterAsOf).toLocaleDateString()}`
+          : 'Sleeper roster data only · supplemental NFL roster data unavailable or stale'}
+        <span>Value uses current status; production uses {data.season}.</span>
       </div>
 
       <div className="filters">
@@ -102,7 +117,7 @@ export function PlayersPage() {
           aria-label="Search players"
         />
 
-        <div className="segmented" role="group" aria-label="Availability">
+        <div className="segmented" role="group" aria-label="Fantasy ownership">
           <button
             aria-pressed={availability === 'free'}
             onClick={() => {
@@ -110,7 +125,7 @@ export function PlayersPage() {
               setRosterId('ALL');
             }}
           >
-            Free agents
+            Fantasy free agents
           </button>
           <button
             aria-pressed={availability === 'rostered'}
@@ -131,6 +146,12 @@ export function PlayersPage() {
             All
           </button>
         </div>
+
+        <select className="select" aria-label="NFL roster status" value={nflStatus}
+          onChange={(e) => setNflStatus(e.target.value as NflRosterStatus | 'all')}>
+          <option value="all">All NFL statuses</option>
+          {Object.entries(ROSTER_LABELS).map(([status, label]) => <option key={status} value={status}>{label}</option>)}
+        </select>
 
         <div className="segmented" role="group" aria-label="Sort by">
           <button aria-pressed={sort === 'value'} onClick={() => setSort('value')}>

@@ -579,7 +579,7 @@ export function buildValueIndex(input: BuildValueIndexInput): ValueIndex {
         ['Weighted recent form', VALUE_WEIGHTS.ewma, pEwma.get(d.pid) ?? 0.5],
         ['Last 4', VALUE_WEIGHTS.last4, pLast4.get(d.pid) ?? 0.5],
         ['Current projection', VALUE_WEIGHTS.forecast, pForecast.get(d.pid) ?? 0.5],
-        ['Team opportunity share', VALUE_WEIGHTS.opportunityShare, pShare.get(d.pid) ?? 0.5],
+        ['Position-group opportunity share', VALUE_WEIGHTS.opportunityShare, pShare.get(d.pid) ?? 0.5],
         ['Recent snap share', VALUE_WEIGHTS.recentSnaps, pRecentSnaps.get(d.pid) ?? 0.5],
         ['Availability', VALUE_WEIGHTS.availability, pAvail.get(d.pid) ?? 0.5],
         ['Floor', VALUE_WEIGHTS.floor, pFloor.get(d.pid) ?? 0.5],

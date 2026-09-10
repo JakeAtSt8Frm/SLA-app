@@ -18,6 +18,7 @@ import {
 import type { Matchup } from '../lib/types';
 import { buildRosterWeek } from './selectors';
 import { isOut, type LeagueData } from './league';
+import { usesCurrentAvailability } from '../lib/availability';
 
 /**
  * `live` lets results that already exist stand, and samples only what is left
@@ -55,7 +56,7 @@ export function weekForecasts(
      * so applying it to a historical week would mark players out in weeks they
      * demonstrably played. It only carries information for the live week.
      */
-    const liveWeek = data.nflState.season === data.season && week >= data.currentWeek;
+    const liveWeek = usesCurrentAvailability(data.nflState, data.season, week);
 
     return buildWeekForecast({
       model: data.residualModel,

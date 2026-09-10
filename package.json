@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "refresh:nfl-context": "tsx scripts/refresh-nfl-context.ts",
+    "verify:availability": "tsx scripts/verify-availability.ts",
+    "verify:metrics": "tsx scripts/verify-player-metrics.ts",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",

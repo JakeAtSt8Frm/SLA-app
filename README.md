@@ -8,6 +8,14 @@ the browser from Sleeper; public FFToday and FantasySharks projection snapshots
 are refreshed by the Pages build, because neither site allows browser
 cross-origin requests.
 
+NFL roster snapshots and current injury/return estimates now refresh with the
+daily build (`npm run refresh:nfl-context`). NFL practice-squad/free-agent status
+is separate from fantasy ownership and adjusts the headline value. Player sheets
+show source dates, opportunity metrics and the limits of the available injury
+history. Schedule comparisons use only results before the selected week.
+See [the evaluation review](docs/player-evaluation-review.md) for the availability
+policy, metric coverage, verification and prioritized follow-up work.
+
 ## Why custom scoring is the whole point
 
 This is a 6-team **superflex, IDP-heavy** league. Seven of the twenty-one
@@ -48,7 +56,7 @@ points.
 **Custom score** — `scoring_settings` × raw stat keys. Exact, verified above.
 
 **Value Score (0–1000)** — the headline number, the **average of two
-within-position valuations**: an in-season half and a dynasty half. Every signal
+availability-adjusted valuations**: an in-season half and a dynasty half. Every signal
 in both is a percentile *within the player's own position group*, which is what
 lets the two be averaged and read the same way — "top of his own pool", not
 comparable across positions.

@@ -333,7 +333,6 @@ interface Row {
   projectedRoleRaw: number | null;
   effRaw: number | null;
   availability: number;
-  injuryFactor: number;
   yearsExp: number | null;
   market: MarketEntry | null;
 }
@@ -394,19 +393,6 @@ export function blendProjectedPpg(
     ppg: observedPpg * (1 - projectionWeight) + projectedPpg * projectionWeight,
     projectionWeight,
   };
-}
-
-/** Maps a current injury designation to a 0..1 availability multiplier. */
-function injuryFactorFor(player: Player | undefined): number {
-  const status = String(player?.injury_status ?? player?.status ?? '')
-    .trim()
-    .toUpperCase();
-  if (!status || status === 'ACTIVE') return 1;
-  if (status === 'QUESTIONABLE') return 0.92;
-  if (status === 'DOUBTFUL') return 0.8;
-  if (status === 'IR' || status === 'PUP' || status === 'NFI') return 0.55;
-  if (status === 'OUT' || status === 'SUSP' || status === 'SUSPENDED') return 0.65;
-  return 0.85;
 }
 
 export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
@@ -482,7 +468,6 @@ export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
         : projection
           ? clamp01(projection.games / 17)
           : 0.6,
-      injuryFactor: injuryFactorFor(player),
       yearsExp: typeof player?.years_exp === 'number' ? player.years_exp : null,
       market: market.get(pid) ?? null,
     };
@@ -578,9 +563,9 @@ export function buildDynastyIndex(input: BuildDynastyIndexInput): DynastyIndex {
           ? (projectedRoleByGroup.get(r.group)?.get(r.pid) ?? 0.5)
           : 0.5;
     const effNorm = r.effRaw !== null ? (effByGroup.get(r.group)?.get(r.pid) ?? 0.5) : 0.5;
-    const riskNorm = clamp01(
-      (r.games > 0 ? r.availability : 0.6) * r.injuryFactor,
-    );
+    // Current status is applied once, to the final blended value. This leg
+    // describes observed participation, which is not an injury diagnosis.
+    const riskNorm = clamp01(r.games > 0 ? r.availability : 0.6);
 
     // Insulation: how well value survives a rough patch — youth, a real role,
     // market standing, and early-career draft runway.
@@ -759,7 +744,7 @@ const LEG_LABELS: Record<keyof typeof DYNASTY_WEIGHTS, string> = {
   role: 'Role & usage',
   insulation: 'Value insulation',
   efficiency: 'Talent & efficiency',
-  risk: 'Availability & injury',
+  risk: 'Observed participation',
 };
 
 function groupOf(player: Player | undefined): PositionGroup | null {

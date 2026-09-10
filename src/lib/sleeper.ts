@@ -175,7 +175,7 @@ export const getSchedule = (season: string, signal?: AbortSignal) =>
   getJson<Array<{ week: number; home: string; away: string; status: string; date: string }>>(
     `${COM}/schedule/nfl/regular/${season}`,
     signal,
-  );
+  ).then((games) => games.filter((game) => !['canceled', 'cancelled'].includes(game.status.toLowerCase())));
 
 /** Trending adds — used to surface waiver activity on the players page. */
 export const getTrendingAdds = (signal?: AbortSignal) =>
