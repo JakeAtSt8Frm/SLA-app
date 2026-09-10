@@ -354,13 +354,33 @@ here — there is nothing to run the league's scoring against.
 | **History** | Season trend: Projected vs Actual vs Optimal, week by week |
 | **Available Players** | Searchable browser over free agents and rostered players |
 | **Schedule** | The NFL week with rostered players, owners and custom scores overlaid |
-| **Analytics** | Playoff odds, standings, all-play record, schedule luck, power index, volatility and defensive generosity |
+| **Analytics** | Playoff odds, standings, season Power Rankings, value-based Team Outlook, all-play record, schedule luck, volatility and defensive generosity |
 
 ### Power rankings
 
-Overall power is based on the app's **headline Value Scores**, rather than
-projected PPG. Each positional rating uses the fixed starter and backup counts
-below, then Overall combines those ratings in proportion to starter slots.
+**Power Rankings** measure the selected season entering the selected week:
+50% average weekly starter points, 25% average over the last four completed
+weeks, and 25% that week's starter projection. All points use the league's custom
+scoring. Results from the selected week and later weeks are excluded, as are
+unfinished live weeks. Week 1 uses projections only; missing components are
+omitted and weights rescaled. A recorded zero still counts. The displayed score
+is weighted points per week, not a win probability. These are transparent policy
+weights, not a backtested forecasting model.
+
+No headline Value Scores, dynasty valuations, age, market price or future-season
+projections enter Power Rankings. Explicit roster-season overrides replay the
+chosen roster against the selected scoring season, matching the other pages.
+`npm run verify:season-power` checks chronology, current availability, missing
+data, projection-only rankings, ties and independence from roster values.
+
+### Team Outlook
+
+**Team Outlook**, directly below Power Rankings, preserves the previous
+value-based ranking. It uses the app's **headline Value Scores**, which blend
+in-season and dynasty scores with current availability adjustments. Each
+positional rating uses the fixed starter and backup counts below, then Overall
+combines those ratings in proportion to starter slots. Bench, taxi and reserve
+players are included.
 
 The previous experimental VORP model applied a 35% discount to weak starters,
 guessed waiver value from the worst rostered player and added a 25% decaying

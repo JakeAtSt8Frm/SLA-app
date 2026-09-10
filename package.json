@@ -25,6 +25,7 @@
     "verify:projections": "tsx scripts/verify-projections.ts",
     "verify:ownership": "tsx scripts/verify-player-ownership.ts",
     "verify:power": "tsx scripts/verify-power.ts",
+    "verify:season-power": "tsx scripts/verify-season-power.ts",
     "verify:roster": "tsx scripts/verify-roster-slots.ts",
     "verify:weekly-teams": "tsx scripts/verify-weekly-player-teams.ts",
     "typecheck": "tsc -b --noEmit"

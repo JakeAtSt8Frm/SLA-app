@@ -192,10 +192,14 @@ export async function cached<T>(
 
   inFlight.set(key, request);
   // Cleared either way — a failed request must not be handed to the next caller,
-  // who may well be a retry of the one that just failed.
-  void request.finally(() => {
+  // who may well be a retry of the one that just failed. `then(clear, clear)`
+  // rather than `finally`, which derives a promise that re-rejects: nothing
+  // awaits this bookkeeping branch, so an aborted load reported it as an
+  // unhandled rejection even though the caller below handles the same failure.
+  const clear = () => {
     if (inFlight.get(key) === request) inFlight.delete(key);
-  });
+  };
+  void request.then(clear, clear);
 
   return request;
 }

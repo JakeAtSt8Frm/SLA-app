@@ -7,6 +7,8 @@ import { useMemo, useState } from 'react';
 import { useLeague, useLeagueData } from '../data/LeagueProvider';
 import { buildRosterWeek } from '../data/selectors';
 import { seasonOdds } from '../data/predictions';
+import { seasonPowerRankings } from '../data/seasonPower';
+import { SEASON_POWER_WEIGHTS } from '../lib/seasonPower';
 import {
   EmptyState,
   MatchupChip,
@@ -34,16 +36,17 @@ interface AllPlayRecord {
   ties: number;
 }
 
-type PowerScope = 'ALL' | PositionGroup;
+type OutlookScope = 'ALL' | PositionGroup;
 
 export function AnalyticsPage() {
   const data = useLeagueData();
   const { setSelectedRosterId, week } = useLeague();
   const { mode } = useTheme();
   const [muGroup, setMuGroup] = useState<PositionGroup>('WR');
-  const [powerScope, setPowerScope] = useState<PowerScope>('ALL');
+  const [outlookScope, setOutlookScope] = useState<OutlookScope>('ALL');
 
   const playoffOdds = useMemo(() => seasonOdds(data, week), [data, week]);
+  const seasonPower = useMemo(() => seasonPowerRankings(data, week), [data, week]);
 
   /**
    * Build every team-week once. buildRosterWeek is memoized, so this also warms
@@ -145,12 +148,12 @@ export function AnalyticsPage() {
   }, [data]);
 
   /**
-   * Forward-looking roster power from the app's headline Value Scores.
+   * Team outlook from the app's headline Value Scores.
    *
    * Every held player is considered, including taxi and reserve. Each position
    * uses its configured starter core plus a lightly weighted group of backups.
    */
-  const powerIndex = useMemo(
+  const outlookIndex = useMemo(
     () =>
       buildPowerIndex({
         rosters: data.teams.map((team) => ({
@@ -175,13 +178,13 @@ export function AnalyticsPage() {
     [data],
   );
 
-  const power = useMemo(() => {
+  const outlook = useMemo(() => {
     const rows = standings.map((team) => {
-      const teamPower = powerIndex.byTeam.get(team.rosterId);
-      const group = teamPower && powerScope !== 'ALL' ? teamPower.byGroup[powerScope] : null;
+      const teamPower = outlookIndex.byTeam.get(team.rosterId);
+      const group = teamPower && outlookScope !== 'ALL' ? teamPower.byGroup[outlookScope] : null;
       return {
         team,
-        value: powerScope === 'ALL' ? (teamPower?.overall ?? 0) : (group?.score ?? 0),
+        value: outlookScope === 'ALL' ? (teamPower?.overall ?? 0) : (group?.score ?? 0),
       };
     });
     const best = Math.max(0, ...rows.map((row) => row.value));
@@ -197,10 +200,10 @@ export function AnalyticsPage() {
         powerPoints: round(value, 1),
       }))
       .sort((a, b) => b.score - a.score || a.rosterId - b.rosterId);
-  }, [powerScope, standings, powerIndex]);
+  }, [outlookScope, standings, outlookIndex]);
 
   const weeklyRanks = useMemo(() => {
-    const teams = power.map((team) => ({
+    const teams = data.teams.map((team) => ({
       rosterId: team.rosterId,
       dataKey: `team_${team.rosterId}`,
       name: team.name,
@@ -272,7 +275,7 @@ export function AnalyticsPage() {
     });
 
     return { teams, points };
-  }, [data, mode, power]);
+  }, [data, mode]);
 
   const defenses = useMemo(() => {
     const entries = data.matchupIndex.byGroup.get(muGroup);
@@ -489,33 +492,90 @@ export function AnalyticsPage() {
           className="card"
           style={{ overflow: 'hidden' }}
           aria-describedby="power-formula"
+          aria-labelledby="power-title"
         >
           <div className="group-head group-head--primary">
-            <span>Power rankings</span>
+            <h2 id="power-title" style={{ fontSize: 'inherit' }}>Power Rankings</h2>
+            <span className="mono">{data.season} · Entering Week {week}</span>
+          </div>
+          <p id="power-formula" className="card-pad small muted" style={{ paddingBottom: 0 }}>
+            Season scoring {fmtPct(SEASON_POWER_WEIGHTS.average)} · last four completed weeks {fmtPct(SEASON_POWER_WEIGHTS.recentAverage)} · Week {week} starter projection {fmtPct(SEASON_POWER_WEIGHTS.projection)}.
+            {' '}Only {data.season} results before Week {week} count. Missing inputs are omitted and the remaining weights rescaled.
+          </p>
+          <div className="scroll-x">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th scope="col">Rank</th>
+                  <th scope="col">Team</th>
+                  <th scope="col" className="num" title="Weighted fantasy points per week; higher is stronger">Power / wk</th>
+                  <th scope="col" className="num">Avg / wk</th>
+                  <th scope="col" className="num">Last 4</th>
+                  <th scope="col" className="num">W{week} proj.</th>
+                  <th scope="col" className="num">Weeks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {seasonPower.map((row) => {
+                  const team = data.teamsById.get(row.rosterId);
+                  if (!team) return null;
+                  const color = teamColor(team.rosterId, mode);
+                  return <tr key={row.rosterId}>
+                    <td className="mono muted">{row.rank ?? '—'}</td>
+                    <td>
+                      <button className="team-name" style={{ color }} onClick={() => setSelectedRosterId(row.rosterId)}>
+                        <span className="team-name__dot" style={{ background: color }} aria-hidden="true" />
+                        {team.name}
+                      </button>
+                    </td>
+                    <td className="num bold">{row.score === null ? '—' : fmt1(row.score)}</td>
+                    <td className="num">{row.average === null ? '—' : fmt1(row.average)}</td>
+                    <td className="num">{row.recentAverage === null ? '—' : fmt1(row.recentAverage)}</td>
+                    <td className="num">{row.projection === null ? '—' : fmt1(row.projection)}</td>
+                    <td className="num muted">{row.games}</td>
+                  </tr>;
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="card-pad tiny muted" style={{ paddingTop: 0 }}>
+            Based on starting lineups and your league’s scoring. — means no usable data; Week 1 uses projections only.
+          </p>
+        </section>
+
+        <section
+          className="card"
+          style={{ overflow: 'hidden' }}
+          aria-describedby="outlook-formula"
+          aria-labelledby="outlook-title"
+        >
+          <div className="group-head group-head--primary">
+            <h2 id="outlook-title" style={{ fontSize: 'inherit' }}>Team Outlook</h2>
             <span className="mono">
-              {powerScope === 'ALL'
-                ? 'Overall · Value'
-                : `${powerScope} · ${POSITION_POWER_COUNTS[powerScope].starters} + ${POSITION_POWER_COUNTS[powerScope].bench} depth`}
+              {outlookScope === 'ALL'
+                ? 'Overall · Roster value'
+                : `${outlookScope} · ${POSITION_POWER_COUNTS[outlookScope].starters} + ${POSITION_POWER_COUNTS[outlookScope].bench} depth`}
             </span>
           </div>
-          <p id="power-formula" className="sr-only">
-            {powerScope === 'ALL'
-              ? 'Overall power combines the position ratings from each roster’s Value Scores, weighted by starter count. The bar is scaled so the strongest roster reads 100.'
-              : `${powerScope} power gives 85 percent of its weight to the top ${POSITION_POWER_COUNTS[powerScope].starters} ${powerScope} Value Scores and 15 percent to the next ${POSITION_POWER_COUNTS[powerScope].bench}. The bar is scaled so the strongest reads 100.`}
+          <p id="outlook-formula" className="card-pad small muted" style={{ paddingBottom: 0 }}>
+            Roster value blends in-season and dynasty player scores, adjusted for current NFL availability. Includes bench, taxi and reserve players.
+            {' '}{outlookScope === 'ALL'
+              ? 'Each position uses 85% starter value and 15% depth; overall weights positions by starter count.'
+              : `${outlookScope} uses 85% of the top ${POSITION_POWER_COUNTS[outlookScope].starters} players’ Value Scores and 15% of the next ${POSITION_POWER_COUNTS[outlookScope].bench}.`}
           </p>
           <div className="card-pad power-controls">
-            <div className="segmented" role="group" aria-label="Power ranking scope">
+            <div className="segmented" role="group" aria-label="Team outlook scope">
               <button
-                aria-pressed={powerScope === 'ALL'}
-                onClick={() => setPowerScope('ALL')}
+                aria-pressed={outlookScope === 'ALL'}
+                onClick={() => setOutlookScope('ALL')}
               >
                 Overall
               </button>
               {POSITION_GROUPS.map((group) => (
                 <button
                   key={group}
-                  aria-pressed={powerScope === group}
-                  onClick={() => setPowerScope(group)}
+                  aria-pressed={outlookScope === group}
+                  onClick={() => setOutlookScope(group)}
                 >
                   {group}
                 </button>
@@ -523,7 +583,7 @@ export function AnalyticsPage() {
             </div>
           </div>
           <div className="card-pad power-list">
-            {power.map((team, index) => {
+            {outlook.map((team, index) => {
               const color = teamColor(team.rosterId, mode);
               return (
                 <div key={team.rosterId} className="power-row">
@@ -543,7 +603,7 @@ export function AnalyticsPage() {
                   <span
                     className="power-track"
                     role="meter"
-                    aria-label={`${team.name} ${powerScope === 'ALL' ? 'overall' : powerScope} power index`}
+                    aria-label={`${team.name} ${outlookScope === 'ALL' ? 'overall' : outlookScope} outlook index`}
                     aria-valuemin={0}
                     aria-valuemax={100}
                     aria-valuenow={team.powerIndex}
@@ -555,7 +615,7 @@ export function AnalyticsPage() {
                   </span>
                   <span
                     className="power-value mono bold"
-                    title={`${team.powerPoints.toFixed(1)} Value-based power score`}
+                    title={`${team.powerPoints.toFixed(1)} roster Value score; bar relative to the strongest team`}
                   >
                     {team.powerPoints.toFixed(1)}
                   </span>
