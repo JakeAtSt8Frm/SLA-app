@@ -359,7 +359,7 @@ here — there is nothing to run the league's scoring against.
 | Page | What it answers |
 |---|---|
 | **Teams** | Roster by slot group, with a positional heatmap |
-| **Matchups** | Who plays who in the selected week, the record each side carries in, and live or pregame win probability |
+| **Matchups** | Who plays who in the selected week, the record each side carries in, and simulations using app projections until kickoff, then current actual points |
 | **Optimal Lineup** | The best legal lineup, and what it cost to miss it |
 | **History** | Season trend: Projected vs Actual vs Optimal, week by week |
 | **Available Players** | Searchable browser over free agents and rostered players |

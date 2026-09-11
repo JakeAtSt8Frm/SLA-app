@@ -162,16 +162,14 @@ export function MatchupsPage() {
   /**
    * Win probability for the selected week.
    *
-   * A week still in progress is simulated live — finished players contribute
-   * their real score and only the rest is sampled. A finished week is replayed
-   * from kickoff instead, because "you won" is not a probability and the only
-   * interesting question left is what the odds were before it started.
+   * Started players contribute their current actual score; only players who
+   * have yet to start are sampled from the app's forecast.
    */
   const complete = useMemo(() => weekIsComplete(data, week), [data, week]);
   const odds = useMemo(() => {
-    const simulation = weekOdds(data, week, complete ? 'pregame' : 'live');
-    return simulation ? { simulation, pregame: complete } : null;
-  }, [data, week, complete]);
+    const simulation = weekOdds(data, week, 'live');
+    return simulation ? { simulation } : null;
+  }, [data, week]);
 
   const played = board.games.some((game) => game.home.actual > 0 || game.away.actual > 0);
   const status = !played ? 'Not started' : complete ? 'Final' : 'In progress';
@@ -310,7 +308,7 @@ export function MatchupsPage() {
                   <p className="h2h__note tiny muted">
                     {leader
                       ? `${leader.team.name} by ${fmt1(Math.abs(margin))}${
-                          odds?.pregame ? '' : ' so far'
+                          complete ? '' : ' so far'
                         }`
                       : played
                         ? 'Tied'
@@ -334,11 +332,12 @@ export function MatchupsPage() {
           <section className="card" style={{ overflow: 'hidden' }}>
             <div className="group-head group-head--primary">
               <span>
-                Week {week} · {odds.pregame ? 'pregame' : 'live'} win probability
+                Week {week} · {complete ? 'final' : 'live'} win probability
               </span>
               <span className="mono">{odds.simulation.iterations.toLocaleString()} sims</span>
             </div>
             <div className="card-pad matchup-odds">
+              <p className="tiny muted">App projections for players yet to start. Current actual points for live and finished players.</p>
               {odds.simulation.matchups.map((game) => {
                 const home = data.teamsById.get(game.home);
                 const away = data.teamsById.get(game.away);

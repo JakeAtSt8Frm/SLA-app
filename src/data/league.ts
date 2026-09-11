@@ -18,6 +18,7 @@ import {
   getNflState,
   getResearch,
   getRosters,
+  getSchedule,
   getSeasonProjections,
   getUsers,
   getWeekProjections,
@@ -48,11 +49,9 @@ import {
   type ProjectionSourceName,
 } from '../lib/projections';
 import { getMarketValues, marketQueryFromLeague } from '../lib/market';
-import {
-  buildMatchupIndex,
-  buildPregameMatchupIndexes,
-  type MatchupIndex,
-} from '../lib/matchup';
+import type { MatchupIndex } from '../lib/matchup';
+import { buildSeasonMatchupContext, completedMatchupWeeks, type MatchupWeek } from '../lib/matchupSeason';
+import type { TeamStats } from '../lib/teamStats';
 import { fitResidualModel, type ResidualModel } from '../lib/forecast';
 import { starterSlots } from '../lib/optimal';
 import { POSITION_GROUPS } from '../lib/types';
@@ -146,6 +145,7 @@ export interface LeagueData {
   /** Roster id of the champion, when the season has a completed bracket. */
   championRosterId: number | null;
   nflState: NflState;
+  nflSchedule: Awaited<ReturnType<typeof getSchedule>>;
   scoringModel: ScoringModel;
   score: (stats: StatLine | undefined | null) => number;
   playersById: Map<string, Player>;
@@ -171,6 +171,7 @@ export interface LeagueData {
   matchupIndex: MatchupIndex;
   /** Pregame ratings for historical weeks, containing earlier results only. */
   pregameMatchupIndexes: Map<number, MatchupIndex>;
+  pregameTeamStats: Map<number, Map<string, TeamStats>>;
   /**
    * Fitted projection-error distributions, per position group. Turns any
    * projection into a distribution with a real floor and ceiling.
@@ -583,7 +584,7 @@ export async function loadLeague(
 
   report('Loading rosters', 0, 1);
 
-  const [users, rosters, playersRaw, bracket, rosterLeague, nflRosters, currentInjuries] = await Promise.all([
+  const [users, rosters, playersRaw, bracket, rosterLeague, nflRosters, currentInjuries, nflSchedule] = await Promise.all([
     cached(`users:${rosterLeagueId}`, TTL.ROSTERS, () => getUsers(rosterLeagueId, signal)),
     cached(`rosters:${rosterLeagueId}`, TTL.ROSTERS, () => getRosters(rosterLeagueId, signal)),
     cached(`players`, TTL.PLAYERS, () => getAllPlayers(signal)),
@@ -596,6 +597,8 @@ export async function loadLeague(
       : Promise.resolve(null),
     getRosterSnapshot(nflState.season, signal),
     getCurrentInjuries(nflState.season, signal),
+    cached(`schedule-current:${season}`, season === nflState.season ? TTL.LIVE_WEEK : TTL.FINAL_WEEK,
+      () => getSchedule(season, signal)),
   ]);
 
   const placements = placementsFromBracket(bracket as BracketMatch[]);
@@ -717,37 +720,73 @@ export async function loadLeague(
 
   report('Computing metrics', 1, 3);
 
-  const matchupIndex = buildMatchupIndex({
+  let previousWeeks: Map<number, MatchupWeek> | undefined;
+  if (Number(season) >= Number(nflState.season)) {
+    const previousSeason = String(Number(season) - 1);
+    report(`Loading ${previousSeason} matchup stats`, 0, 18);
+    let loaded = 0;
+    previousWeeks = new Map(await mapLimit(
+      Array.from({ length: 18 }, (_, i) => i + 1),
+      4,
+      async (week): Promise<[number, MatchupWeek]> => {
+        const stats = await cached(`stats:${previousSeason}:${week}`, TTL.FINAL_WEEK, () =>
+          getWeekStats(previousSeason, week, 'regular', signal),
+        );
+        report(`Loading ${previousSeason} matchup stats`, ++loaded, 18);
+        return [week, stats];
+      },
+    ));
+  }
+  const matchupInput = {
+    season,
+    completedWeeks: completedMatchupWeeks(season, nflState),
+    weeks,
+    previousWeeks,
     scoringModel,
     playersById,
-    weekStats,
-    weekOpponents,
-    weekTeams,
-    throughWeek: currentWeek,
-  });
-  const pregameMatchupIndexes = buildPregameMatchupIndexes(
-    {
-      scoringModel,
-      playersById,
-      weekStats,
-      weekOpponents,
-      weekTeams,
-    },
-    maxWeek,
-  );
+  };
+  const matchupContexts = new Map<number, ReturnType<typeof buildSeasonMatchupContext>>();
+  const contextBefore = (beforeWeek: number) => {
+    const throughWeek = Math.min(beforeWeek - 1, matchupInput.completedWeeks);
+    const key = previousWeeks && throughWeek < 4 ? -1 : throughWeek;
+    let context = matchupContexts.get(key);
+    if (!context) {
+      context = buildSeasonMatchupContext({ ...matchupInput, beforeWeek });
+      matchupContexts.set(key, context);
+    }
+    return context;
+  };
+  const matchupIndex = contextBefore(19).index;
+  const pregameMatchupIndexes = new Map<number, MatchupIndex>();
+  const pregameTeamStats = new Map<number, Map<string, TeamStats>>();
+  for (let week = 1; week <= 18; week++) {
+    const context = contextBefore(week);
+    pregameMatchupIndexes.set(week, context.index);
+    pregameTeamStats.set(week, context.teamStats);
+  }
 
   /*
    * Projection-error distributions, fit on every projected player-week loaded
    * above. This is what lets the app quote a floor and a ceiling instead of a
    * single number, and it costs one extra pass over data already in memory.
    */
+  const previousForecastWeeks = matchupInput.completedWeeks < 4 ? previousWeeks : undefined;
+  const forecastProjections = previousForecastWeeks
+    ? new Map(await mapLimit(Array.from({ length: 18 }, (_, i) => i + 1), 4,
+      async (week): Promise<[number, Record<string, StatLine>]> => {
+        const year = String(Number(season) - 1);
+        const payload = await cached(`proj:${year}:${week}`, TTL.FINAL_WEEK,
+          () => getWeekProjections(year, week, 'regular', signal));
+        return [week, payload.stats];
+      }))
+    : weekProjections;
   const residualModel = fitResidualModel({
     scoringModel,
     playersById,
-    weekStats,
-    weekProjections,
-    weekTeams,
-    throughWeek: currentWeek,
+    weekStats: previousForecastWeeks ? new Map([...previousForecastWeeks].map(([week, data]) => [week, data.stats])) : weekStats,
+    weekProjections: forecastProjections,
+    weekTeams: previousForecastWeeks ? new Map([...previousForecastWeeks].map(([week, data]) => [week, data.teams])) : weekTeams,
+    throughWeek: previousForecastWeeks ? 18 : matchupInput.completedWeeks,
   });
 
   /*
@@ -890,6 +929,7 @@ export async function loadLeague(
     rostersOverridden: rostersAreOverridden,
     championRosterId: rostersAreOverridden ? null : championRosterId,
     nflState,
+    nflSchedule,
     scoringModel,
     score,
     playersById,
@@ -905,6 +945,7 @@ export async function loadLeague(
     combinedScores,
     matchupIndex,
     pregameMatchupIndexes,
+    pregameTeamStats,
     residualModel,
     futureMatchups,
     futureProjections,

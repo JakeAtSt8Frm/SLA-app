@@ -50,7 +50,7 @@ export function enrichPlayer(
 ): EnrichedPlayer {
   const weekData = data.weeks.get(week);
   const statLine: StatLine | undefined = weekData?.stats[pid];
-  const projLine: StatLine | undefined = weekData?.projections[pid];
+  const projLine: StatLine | undefined = weekData?.projections[pid] ?? data.futureProjections.get(week)?.[pid];
   const opponent = weekData?.opponents[pid] ?? null;
 
   const player = data.playersById.get(pid);
@@ -125,7 +125,7 @@ export function buildRosterWeek(
   }
 
   const weekData = data.weeks.get(week);
-  const matchup = weekData?.matchups.find((m) => m.roster_id === rosterId);
+  const matchup = (weekData?.matchups ?? data.futureMatchups.get(week))?.find((m) => m.roster_id === rosterId);
 
   const clean = (ids: (string | null | undefined)[] | null | undefined) =>
     (ids ?? []).map((x) => String(x ?? '')).filter((x) => x && x !== '0');

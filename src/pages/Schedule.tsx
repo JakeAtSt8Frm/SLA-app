@@ -16,7 +16,7 @@ import { cached, TTL } from '../data/cache';
 import { getSchedule, teamLogo } from '../lib/sleeper';
 import { groupForPlayer } from '../lib/scoring';
 import { enrichPlayer } from '../data/selectors';
-import { buildTeamStats, type TeamStats } from '../lib/teamStats';
+import type { TeamStats } from '../lib/teamStats';
 import type { MatchupIndex } from '../lib/matchup';
 import { AvailabilityBadge } from '../components/AvailabilityBadge';
 import type { Player } from '../lib/types';
@@ -196,10 +196,8 @@ export function SchedulePage() {
     return n;
   }, [weekGames, ownership, data, week]);
 
-  const teamStats = useMemo(() => buildTeamStats(data.weeks, week), [data, week]);
-  // An empty week-one index is intentional: later results would leak into a pregame view.
-  const matchupIndex = data.pregameMatchupIndexes.get(week)
-    ?? (data.matchupIndex.throughWeek < week ? data.matchupIndex : undefined);
+  const teamStats = data.pregameTeamStats.get(week) ?? new Map<string, TeamStats>();
+  const matchupIndex = data.pregameMatchupIndexes.get(week);
 
   return (
     <>
@@ -470,7 +468,7 @@ function MatchupStats({ home, away, week, teams, index }: {
   return <div className="matchup-preview">
     <div className="row-between wrap" style={{ gap: 8 }}>
       <h3 className="small bold">Pregame comparison</h3>
-      <span className="tiny muted">{week === 1 ? 'No earlier games this season' : `Through week ${week - 1}`}</span>
+      <span className="tiny muted">{index?.season ? `${index.season} stats · Through week ${index.throughWeek}` : `Before week ${week}`}</span>
     </div>
     <table className="context-table matchup-table">
       <thead><tr><th>Team offense</th><th>{away}</th><th>{home}</th></tr></thead>

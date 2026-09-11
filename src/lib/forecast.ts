@@ -590,6 +590,8 @@ export interface BuildWeekForecastInput {
   teams?: Record<string, string>;
   /** Players known to be unavailable this week. */
   isOut?: (pid: string) => boolean;
+  /** Live or finished NFL games lock the current score, including zero. */
+  hasStarted?: (pid: string) => boolean;
   /** Restrict the build to these players. Omit to forecast everyone projected. */
   only?: Set<string>;
 }
@@ -630,20 +632,33 @@ export function buildWeekForecast(input: BuildWeekForecastInput): Map<string, Pl
   const score = createScorer(scoringModel);
   const out = new Map<string, PlayerForecast>();
 
-  const pids = only ? [...only] : Object.keys(projections);
+  const pids = only ? [...only] : new Set([...Object.keys(projections), ...Object.keys(stats ?? {})]);
 
   for (const pid of pids) {
     const group = groupForPlayer(playersById.get(pid));
     if (!group) continue;
     const fit = model.byGroup.get(group);
-    if (!fit) continue;
 
     const projLine = projections[pid];
     const projection = hasValidProjection(projLine) ? score(projLine) : 0;
 
     const statLine = stats?.[pid];
-    const played = hasPlayed(statLine);
+    const played = hasPlayed(statLine) || input.hasStarted?.(pid) === true;
     const actual = played ? score(statLine) : null;
+
+    // A missing fit is missing uncertainty, not a reason to drop a starter.
+    if (!fit) {
+      const points = isOut?.(pid) && !played ? 0 : projection;
+      out.set(pid, {
+        pid, group, projection: round(projection), biasShift: 0,
+        median: round(points), mean: round(points), sd: 0,
+        p10: round(points), p25: round(points), p75: round(points), p90: round(points),
+        playProb: played || points > 0 ? 1 : 0,
+        actual: actual === null ? null : round(actual),
+        nflTeam: (teams?.[pid] ?? playersById.get(pid)?.team ?? '').toUpperCase(),
+      });
+      continue;
+    }
 
     /*
      * Play probability. A player Sleeper does not project for this week is on a

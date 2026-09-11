@@ -60,6 +60,8 @@ jobs:
 
       - run: npm run verify:matchup
 
+      - run: npm run verify:forecast && npm run verify:live-sims
+
       - run: npm run build
 
       # Requires Pages to already be enabled on the repo with the "GitHub

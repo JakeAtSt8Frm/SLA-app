@@ -632,7 +632,7 @@ export function AnalyticsPage() {
 
         <section className="card" style={{ overflow: 'hidden' }}>
           <div className="group-head group-head--primary">
-            <span>Matchup research — points allowed by defence</span>
+            <span>Matchup research — points allowed by defence ({data.matchupIndex.season ?? data.season})</span>
           </div>
 
           <div className="card-pad" style={{ paddingBottom: 10 }}>

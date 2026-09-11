@@ -83,6 +83,8 @@ export interface MatchupIndex {
   /** group -> defensive team -> entry */
   byGroup: Map<PositionGroup, Map<string, MatchupEntry>>;
   throughWeek: number;
+  /** Season supplying the ratings, when built for an app view. */
+  season?: string;
   defenses: string[];
   get(
     group: PositionGroup | null,

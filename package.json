@@ -22,6 +22,7 @@
     "verify": "tsx scripts/verify-scoring.ts",
     "verify:dynasty": "tsx scripts/verify-dynasty-projections.ts",
     "verify:forecast": "tsx scripts/verify-forecast.ts",
+    "verify:live-sims": "tsx scripts/verify-live-sims.ts",
     "verify:matchup": "tsx scripts/verify-matchup.ts",
     "verify:projections": "tsx scripts/verify-projections.ts",
     "verify:ownership": "tsx scripts/verify-player-ownership.ts",

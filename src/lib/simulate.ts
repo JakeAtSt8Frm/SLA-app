@@ -135,7 +135,10 @@ function sampleLeagueWeek(
       if (player.playProb <= 0 || player.projection <= 0) continue;
 
       const fit = model.byGroup.get(player.group);
-      if (!fit) continue;
+      if (!fit) {
+        total += player.mean;
+        continue;
+      }
 
       if (rng() >= player.playProb) continue; // did not play: contributes zero
 

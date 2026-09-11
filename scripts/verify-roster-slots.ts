@@ -70,6 +70,8 @@ const data = {
     ],
   ]),
   starterSlots,
+  futureProjections: new Map(),
+  futureMatchups: new Map(),
   score: () => 0,
   valueIndex: {
     byPlayer: new Map(),

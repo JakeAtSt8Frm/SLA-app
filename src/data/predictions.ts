@@ -21,10 +21,9 @@ import { isOut, type LeagueData } from './league';
 import { usesCurrentAvailability } from '../lib/availability';
 
 /**
- * `live` lets results that already exist stand, and samples only what is left
- * to play. `pregame` ignores results entirely — the honest way to ask "what
- * were the odds before kickoff", which is the only interesting question about a
- * week that has already finished.
+ * `live` locks current actual points for started players and samples players
+ * yet to start. `pregame` ignores results for forecast comparisons and future
+ * season simulations.
  */
 export type ForecastMode = 'live' | 'pregame';
 
@@ -57,15 +56,28 @@ export function weekForecasts(
      * demonstrably played. It only carries information for the live week.
      */
     const liveWeek = usesCurrentAvailability(data.nflState, data.season, week);
+    const startedTeams = new Set(data.nflSchedule
+      .filter((game) => game.week === week && ['in_progress', 'complete', 'closed'].includes(game.status.toLowerCase()))
+      .flatMap((game) => [game.home.toUpperCase(), game.away.toUpperCase()]));
+    const rostered = data.teams.flatMap((team) => team.roster.players ?? []);
 
     return buildWeekForecast({
       model: data.residualModel,
       scoringModel: data.scoringModel,
       playersById: data.playersById,
-      projections: weekData?.projections ?? {},
+      projections: weekData?.projections ?? data.futureProjections.get(week) ?? {},
       stats: mode === 'live' ? weekData?.stats : undefined,
       teams: weekData?.teams,
       isOut: liveWeek ? (pid) => isOut(data.playersById.get(pid)) : undefined,
+      hasStarted: mode === 'live'
+        ? (pid) => startedTeams.has((weekData?.teams[pid] ?? data.playersById.get(pid)?.team ?? '').toUpperCase())
+        : undefined,
+      only: new Set([
+        ...rostered,
+        ...Object.keys(weekData?.projections ?? data.futureProjections.get(week) ?? {}),
+        ...Object.keys(weekData?.stats ?? {}),
+        ...(weekData?.matchups ?? data.futureMatchups.get(week) ?? []).flatMap((matchup) => matchup.starters ?? []),
+      ]),
       // Everyone projected, not just starters: the player sheet opens on free
       // agents too, and building the extra rows is a few milliseconds of
       // arithmetic against data already in memory.
@@ -117,7 +129,7 @@ export function weekOdds(
   mode: ForecastMode = 'live',
 ): WeekSimulation | null {
   return memo(data, `weekOdds:${week}:${mode}`, () => {
-    const pairings = pairingsOf(data.weeks.get(week)?.matchups ?? []);
+    const pairings = pairingsOf(data.weeks.get(week)?.matchups ?? data.futureMatchups.get(week) ?? []);
     if (!pairings.length) return null;
 
     return simulateWeek({
@@ -134,13 +146,13 @@ export function weekOdds(
 /**
  * Whether a week's games are all finished.
  *
- * Scoped to the players this league actually started. Asking the question of
- * every projected player in the NFL would never answer yes: a few hundred carry
- * a projection and are then inactive on any given Sunday, so the week would look
- * permanently in progress and every finished game would render as a 100%/0%
- * "live" probability, which is a result, not a forecast.
+ * Prefer the NFL game statuses: recording stats does not mean a live game has
+ * finished. For a missing historical schedule, inspect the league's starters.
  */
 export function weekIsComplete(data: LeagueData, week: number): boolean {
+  const games = data.nflSchedule.filter((game) => game.week === week);
+  if (games.length) return games.every((game) => ['complete', 'closed'].includes(game.status.toLowerCase()));
+  if (data.season === data.nflState.season && data.nflState.season_type === 'regular' && week >= data.nflState.week) return false;
   let started = 0;
 
   for (const team of data.teams) {
