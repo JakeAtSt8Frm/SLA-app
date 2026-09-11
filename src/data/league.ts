@@ -178,6 +178,14 @@ export interface LeagueData {
   residualModel: ResidualModel;
   /** Regular-season pairings for weeks that haven't been played yet. */
   futureMatchups: Map<number, Matchup[]>;
+  /**
+   * Per-week projections for regular-season weeks still to be played.
+   *
+   * Kept out of `weeks` deliberately: an entry there with no stats would be
+   * read as a played week with nobody scoring, which is exactly what skews the
+   * per-game averages in the value model.
+   */
+  futureProjections: Map<number, Record<string, StatLine>>;
   playoff: PlayoffFormat;
 }
 
@@ -750,16 +758,26 @@ export async function loadLeague(
    */
   const format = playoffFormat(league);
   const futureMatchups = new Map<number, Matchup[]>();
+  const futureProjections = new Map<number, Record<string, StatLine>>();
   if (maxWeek > 0 && maxWeek < format.regularSeasonWeeks) {
     const upcoming = Array.from(
       { length: format.regularSeasonWeeks - maxWeek },
       (_, i) => maxWeek + 1 + i,
     );
     await mapLimit(upcoming, 4, async (week) => {
-      const pairings = await cached(`matchups:${leagueId}:${week}`, TTL.LIVE_WEEK, () =>
-        getMatchups(leagueId, week, signal).catch(() => [] as Matchup[]),
-      ).catch(() => [] as Matchup[]);
+      // Sleeper publishes a projection for every regular-season week well
+      // ahead of it, which is what lets the season total be projected to its
+      // end rather than extrapolated from one week's number.
+      const [pairings, projections] = await Promise.all([
+        cached(`matchups:${leagueId}:${week}`, TTL.LIVE_WEEK, () =>
+          getMatchups(leagueId, week, signal).catch(() => [] as Matchup[]),
+        ).catch(() => [] as Matchup[]),
+        cached(`proj:${season}:${week}`, TTL.SEASON_PROJECTIONS, () =>
+          getWeekProjections(season, week, 'regular', signal),
+        ).catch(() => null),
+      ]);
       if (pairings.length) futureMatchups.set(week, pairings);
+      if (projections) futureProjections.set(week, projections.stats);
     });
   }
 
@@ -889,6 +907,7 @@ export async function loadLeague(
     pregameMatchupIndexes,
     residualModel,
     futureMatchups,
+    futureProjections,
     playoff: format,
   };
 }

@@ -46,8 +46,8 @@ export function AnalyticsPage() {
   const [outlookScope, setOutlookScope] = useState<RankingScope>('ALL');
 
   const playoffOdds = useMemo(() => seasonOdds(data, week), [data, week]);
-  const seasonPower = useMemo(() => seasonPowerRankings(data, week, powerScope), [data, week, powerScope]);
-  const bestSeasonPower = Math.max(0, ...seasonPower.map((row) => row.score ?? 0));
+  const seasonPower = useMemo(() => seasonPowerRankings(data, powerScope), [data, powerScope]);
+  const bestSeasonPower = Math.max(0, ...seasonPower.map((row) => row.total ?? 0));
 
   /**
    * Build every team-week once. buildRosterWeek is memoized, so this also warms
@@ -487,7 +487,7 @@ export function AnalyticsPage() {
         >
           <div className="group-head group-head--primary">
             <h2 id="power-title" style={{ fontSize: 'inherit' }}>Power Rankings</h2>
-            <span className="mono">{data.season} · Entering Week {week}</span>
+            <span className="mono">{data.season} · Projected weeks 1–{data.playoff.regularSeasonWeeks}</span>
           </div>
           <div className="card-pad power-controls">
             <div className="segmented" role="group" aria-label="Power ranking scope">
@@ -506,9 +506,13 @@ export function AnalyticsPage() {
               const team = data.teamsById.get(row.rosterId);
               if (!team) return null;
               const color = teamColor(team.rosterId, mode);
-              const index = round(powerIndexOf(row.score ?? 0, bestSeasonPower), 1);
+              const index = round(powerIndexOf(row.total ?? 0, bestSeasonPower), 1);
+              // The bar splits where the season does: solid for points already
+              // banked, faded for the part still only projected.
+              const playedShare = bestSeasonPower > 0 ? (row.played / bestSeasonPower) * 100 : 0;
+              const projectedShare = bestSeasonPower > 0 ? (row.projected / bestSeasonPower) * 100 : 0;
               const format = (value: number | null) => value === null ? '—' : fmt1(value);
-              const breakdown = `Season avg ${format(row.average)} · Last 4 ${format(row.recentAverage)} · W${week} projection ${format(row.projection)} · ${row.games} completed weeks`;
+              const breakdown = `${format(row.played)} banked over ${row.playedWeeks} played · ${format(row.projected)} projected over ${row.remainingWeeks} remaining · ${format(row.perWeek)} per week`;
               return (
                 <div key={row.rosterId} className="power-row">
                   <span className="power-rank mono bold">{row.rank ?? '—'}</span>
@@ -516,17 +520,20 @@ export function AnalyticsPage() {
                     <span className="team-name__dot" style={{ background: color }} aria-hidden="true" />
                     {team.name}
                   </button>
-                  {row.score === null ? <span className="power-track" aria-hidden="true" /> : (
+                  {row.total === null ? <span className="power-track" aria-hidden="true" /> : (
                     <span className="power-track" role="meter"
-                      aria-label={`${team.name} ${powerScope === 'ALL' ? 'overall' : powerScope} season power index`}
+                      aria-label={`${team.name} ${powerScope === 'ALL' ? 'overall' : powerScope} projected season total`}
                       aria-valuemin={0} aria-valuemax={100} aria-valuenow={index}
-                      aria-valuetext={`${format(row.score)} weighted points per week. ${breakdown}`}
+                      aria-valuetext={`${format(row.total)} projected points. ${breakdown}`}
                       title={breakdown}>
-                      {index > 0 && <span className="power-fill" style={{ width: `${index}%`, background: color }} />}
+                      {playedShare > 0 && <span className="power-fill" style={{ width: `${playedShare}%`, background: color }} />}
+                      {projectedShare > 0 && (
+                        <span className="power-fill power-fill--projected" style={{ width: `${projectedShare}%`, background: color }} />
+                      )}
                     </span>
                   )}
-                  <span className="power-value mono bold" title={`${format(row.score)} weighted points per week. ${breakdown}`}>
-                    {format(row.score)}
+                  <span className="power-value mono bold" title={`${format(row.total)} projected points. ${breakdown}`}>
+                    {format(row.total)}
                   </span>
                 </div>
               );

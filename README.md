@@ -368,25 +368,37 @@ here — there is nothing to run the league's scoring against.
 
 ### Power rankings
 
-**Power Rankings** measure the selected season entering the selected week:
-50% average weekly starter points, 25% average over the last four completed
-weeks, and 25% that week's starter projection. All points use the league's custom
-scoring. Results from the selected week and later weeks are excluded, as are
-unfinished live weeks. Week 1 uses projections only; missing components are
-omitted and weights rescaled. A recorded zero still counts. The displayed score
-is weighted points per week, not a win probability. These are transparent policy
-weights, not a backtested forecasting model.
+**Power Rankings** project the whole regular season: points already banked in
+completed weeks, plus the projected score of every week still to play, summed
+into one season total. That is the ranking key, so a team that has built a lead
+keeps it and a team whose roster has fallen apart stops being flattered by weeks
+it already won. All points use the league's custom scoring, and the season runs
+to the league's own `playoff_week_start` (weeks 1–13 here).
 
-Overall and QB/RB/WR/TE/K/DL/LB/DB tabs each show ranked team bars, scaled to the
-strongest team in that view. Positional rankings use only starters at that
-football position, including players in flex slots, with the same season/recent/
-projection weights. Hover a score or bar for its scoring breakdown.
+A played week is settled: its result counts and the projection it was trying to
+predict is discarded. A recorded zero is a result. Remaining weeks use today's
+starting lineup against each week's own Sleeper projection — per week, not one
+week's number multiplied out, so byes and schedule land where they actually do.
+
+Remaining weeks are discounted for availability, using the same
+`availabilityFactors().season` policy the player sheet shows: practice squad,
+free agent, reserve, suspended, inactive, retired, and the injury designations,
+including the estimated return window. One availability policy, applied
+everywhere, rather than a second one that could disagree with the player card.
+Today's status never rewrites a week already played.
+
+Each bar splits where the season does — solid for points banked, lighter for the
+part still only projected — and is scaled to the strongest team in that view.
+Overall and QB/RB/WR/TE/K/DL/LB/DB tabs each rank on that position's starters
+alone, including players in flex slots. Hover a bar for the banked/projected
+split and the per-week average.
 
 No headline Value Scores, dynasty valuations, age, market price or future-season
 projections enter Power Rankings. Explicit roster-season overrides replay the
 chosen roster against the selected scoring season, matching the other pages.
-`npm run verify:season-power` checks chronology, current availability, missing
-data, projection-only rankings, ties and independence from roster values.
+`npm run verify:season-power` checks the season totals, settled weeks,
+availability, regular-season bounds, positional scoring, ties and independence
+from roster values.
 
 ### Team Outlook
 
